@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import { WalletReview } from "@/components/wallet-review";
+import { ManualTestOrder } from "@/components/manual-order";
 import { GuardianShield } from "@/components/guardian-shield";
 import { listHidekiPerps, type PerpQuote } from "@/lib/guardian/markets";
 import { readProtocolAccount, previewDryRun } from "@/lib/guardian/protocol";
@@ -177,6 +178,8 @@ export function GuardianDesk() {
       <GuardianShield />
 
       <WalletReview />
+
+      <ManualTestOrder />
 
       <section className="flex flex-col gap-3">
         <div className="flex items-baseline justify-between gap-3">

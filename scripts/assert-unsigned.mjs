@@ -16,12 +16,17 @@ async function filesUnder(dir) {
   return found;
 }
 
+const manualClient = "src/lib/guardian/manual-order-client.ts";
+const manualTradeCalls = [/createTrader\s*\(/, /placePerpOrder\s*\(/];
+
 const hits = [];
 for (const file of await filesUnder(path.join(root, "src"))) {
   const text = await readFile(file, "utf8");
   const relative = path.relative(root, file);
   for (const pattern of tradeCalls) {
-    if (pattern.test(text)) hits.push(`${relative} matches ${pattern}`);
+    if (!pattern.test(text)) continue;
+    const allowed = relative === manualClient && manualTradeCalls.some((item) => item.source === pattern.source);
+    if (!allowed) hits.push(`${relative} matches ${pattern}`);
   }
   if (relative.startsWith("src/lib/guardian/")) {
     for (const pattern of secrets) {
@@ -35,4 +40,4 @@ if (hits.length > 0) {
   process.exit(1);
 }
 
-console.log("unsigned: src has no order placement, and guardian code has no private key");
+console.log("unsigned: order placement is isolated to manual-order-client, and guardian code has no private key");

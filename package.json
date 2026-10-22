@@ -18,7 +18,7 @@
     "typecheck": "tsc --noEmit",
     "check:unsigned": "node scripts/assert-unsigned.mjs",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/preview-path-prefix.test.ts src/lib/guardian/monitor.test.ts src/lib/guardian/preview.test.ts src/lib/guardian/execution.test.ts src/lib/guardian/review.test.ts src/lib/guardian/stop-preview.test.ts src/lib/guardian/shield.test.ts src/lib/guardian/intelligence.test.ts",
+    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/preview-path-prefix.test.ts src/lib/guardian/monitor.test.ts src/lib/guardian/preview.test.ts src/lib/guardian/execution.test.ts src/lib/guardian/review.test.ts src/lib/guardian/stop-preview.test.ts src/lib/guardian/shield.test.ts src/lib/guardian/intelligence.test.ts src/lib/guardian/manual-order.test.ts",
     "lint": "eslint .",
     "format": "prettier --write ."
   },
