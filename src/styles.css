@@ -3,13 +3,17 @@
 @theme {
   --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
-  --color-bg: #101412;
-  --color-surface: #181e1b;
-  --color-raised: #212924;
-  --color-fg: #e7eee8;
-  --color-muted: #93a399;
-  --color-line: #2c3832;
-  --color-accent: #e2b15a;
+  --color-bg: #070d14;
+  --color-surface: #101920;
+  --color-raised: #0c161d;
+  --color-fg: #f7f8f8;
+  --color-muted: #8e989f;
+  --color-line: #1c2a33;
+  --color-accent: #f0b650;
+  --color-ink: #1a1408;
+  --color-healthy: #41de84;
+  --color-warning: #f68917;
+  --color-danger: #e45454;
 }
 
 @layer base {

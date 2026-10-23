@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ShieldAlert } from "lucide-react";
+import ChartNoAxesColumn from "lucide-react/dist/esm/icons/chart-no-axes-column";
+import Clock from "lucide-react/dist/esm/icons/clock";
+import Copy from "lucide-react/dist/esm/icons/copy";
+import Home from "lucide-react/dist/esm/icons/home";
+import Play from "lucide-react/dist/esm/icons/play";
+import Shield from "lucide-react/dist/esm/icons/shield";
 import { WalletReview } from "@/components/wallet-review";
 import { ManualTestOrder } from "@/components/manual-order";
 import { GuardianShield } from "@/components/guardian-shield";
@@ -34,10 +39,12 @@ import {
 } from "@/lib/guardian/risk";
 
 type LogLine = { id: number; text: string; kind: GuardAction["kind"] };
+type Screen = "dashboard" | "protection" | "trade";
 
 const STALE_SEC = 180;
 
 export function GuardianDesk() {
+  const [screen, setScreen] = useState<Screen>("dashboard");
   const [quotes, setQuotes] = useState<PerpQuote[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [symbol, setSymbol] = useState("BTC");
@@ -157,176 +164,175 @@ export function GuardianDesk() {
   const stressed = view.band !== "Healthy";
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-5 px-4 py-5 sm:px-6 sm:py-8">
-      <header className="flex flex-col gap-3 border-b border-line pb-5 sm:flex-row sm:items-end sm:justify-between">
-        <div className="flex items-start gap-3">
-          <ShieldAlert className="mt-1 size-6 shrink-0 text-accent" aria-hidden="true" />
-          <div>
-            <p className="font-mono text-xs tracking-widest text-muted">HIDEKI · CHAIN 50383 · DRY-RUN</p>
-            <h1 className="text-2xl font-semibold tracking-tight">Liquidation Guardian</h1>
-            <p className="mt-1 max-w-xl text-sm leading-relaxed text-muted">
-              Indexer marks feed the scenario calculator only. Account risk uses the protocol snapshot.
-              Orders stay disarmed.
-            </p>
-          </div>
+    <div className="min-h-screen overflow-x-hidden bg-bg">
+      <main className="mx-auto flex w-full min-w-0 max-w-[430px] flex-col gap-3 px-4 pb-28 pt-4">
+        <AppHeader />
+        <ProtocolPanel screen={screen} />
+
+        <div className={screen === "protection" ? "order-2 flex flex-col gap-3" : "hidden"}>
+          <GuardianShield />
         </div>
-        <p className="font-mono text-xs text-accent">No key · no withdraw · no send</p>
-      </header>
 
-      <ProtocolPanel />
-
-      <GuardianShield />
-
-      <WalletReview />
-
-      <ManualTestOrder />
-
-      <section className="flex flex-col gap-3">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2 className="text-sm font-medium">Markets</h2>
-          <p className="font-mono text-xs text-muted">
-            {quotes === null ? "Loading indexer…" : loadError ? "Indexer unavailable" : `${quotes.length} perps`}
-          </p>
-        </div>
-        {loadError ? (
-          <p className="rounded-lg border border-line bg-surface px-3 py-3 text-sm text-muted">{loadError}</p>
-        ) : null}
-        <div className="flex flex-wrap gap-2">
-          {(quotes ?? []).map((item) => {
-            const selected = item.symbol === symbol;
-            return (
-              <button
-                key={item.symbol}
-                type="button"
-                onClick={() => {
-                  setSymbol(item.symbol);
-                  setEntry("");
-                  setPending(null);
-                  setLastKey(null);
-                }}
-                className={
-                  "h-11 min-w-16 rounded-lg border px-3 font-mono text-sm transition-colors " +
-                  (selected
-                    ? "border-accent bg-raised text-fg"
-                    : "border-line bg-surface text-muted hover:text-fg")
-                }
-              >
-                {item.symbol}
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="grid gap-3 sm:grid-cols-4">
-        <Stat label="Mark" value={mark ? formatPx(mark) : "—"} hint={quote ? formatAge(ageSec) : "no row"} warn={Boolean(quote) && ageSec > STALE_SEC} />
-        <Stat label="Index" value={index ? formatPx(index) : "—"} hint="indexer" />
-        <Stat label="Initial margin" value={quote ? `${(view.im / 100).toFixed(2)}%` : "—"} hint="from market row" />
-        <Stat
-          label="Open interest"
-          value={quote ? formatPx(quoteToNumber(quote.openInterest, quote.baseDecimals)) : "—"}
-          hint={quote ? quote.symbol : ""}
-        />
-      </section>
-
-      <details className="rounded-xl border border-line bg-surface p-4">
-        <summary className="cursor-pointer text-sm font-medium">Scenario calculator — not live account data</summary>
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <form
-          className="flex flex-col gap-4 rounded-xl border border-line bg-surface p-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            runCheck();
-          }}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-medium">Simulated scenario</h2>
-            <p className="font-mono text-xs text-muted">Not the account monitor</p>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            {(["long", "short"] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => setSide(option)}
-                className={
-                  "h-11 rounded-lg border font-medium capitalize transition-colors " +
-                  (side === option ? "border-accent bg-raised text-fg" : "border-line text-muted")
-                }
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-          <Field label="Size" value={size} onChange={setSize} />
-          <Field label="Entry" value={entry} onChange={setEntry} />
-          <Field label="Collateral USDso" value={collateral} onChange={setCollateral} />
-          <Field label="Maintenance bps" value={mmBps} onChange={setMmBps} />
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Reduce below" value={reduceBelow} onChange={setReduceBelow} />
-            <Field label="Flatten below" value={flattenBelow} onChange={setFlattenBelow} />
-            <Field label="Reduce %" value={reducePct} onChange={setReducePct} />
-            <Field label="Max reduce %" value={maxReducePct} onChange={setMaxReducePct} />
-          </div>
-          <button type="submit" className="h-11 rounded-lg bg-accent font-medium text-bg transition-opacity hover:opacity-90">
-            Check protection
-          </button>
-          <button
-            type="button"
-            disabled={!pending}
-            onClick={applySimulatedFill}
-            className="h-11 rounded-lg border border-line font-medium text-fg disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Apply simulated fill
-          </button>
-        </form>
-
-        <div className="flex flex-col gap-4">
-          <div className="rounded-xl border border-line bg-surface p-4">
-            <div className="flex items-baseline justify-between gap-3">
-              <h2 className="text-sm font-medium">Estimated health</h2>
-              <p className={"font-mono text-sm " + (stressed ? "text-accent" : "text-fg")}>{view.band}</p>
+        <div className={screen === "trade" ? "flex flex-col gap-3" : "hidden"}>
+          <ManualTestOrder />
+          <section className="order-2 rounded-2xl border border-line bg-surface p-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold">Select Market</h2>
+              <p className="flex items-center gap-1.5 text-xs text-muted">
+                <span className={"size-1.5 rounded-full " + (loadError ? "bg-danger" : "bg-healthy")} />
+                {quotes === null ? "Loading" : loadError ? "Indexer unavailable" : "Live prices (testnet)"}
+              </p>
             </div>
-            <p className="mt-3 font-mono text-3xl font-medium tracking-tight">{ratioLabel}</p>
-            <p className="mt-1 text-sm text-muted">Equity over maintenance. 1.00× is the liquidation line.</p>
-            <div className="mt-4 h-2 overflow-hidden rounded-full bg-raised">
-              <div className="h-full bg-accent" style={{ width: `${bar}%` }} />
+            {loadError ? <p className="mt-3 text-sm text-danger">{loadError}</p> : null}
+            <div className="mt-3 flex min-w-0 gap-2 overflow-x-auto pb-1">
+              {[...(quotes ?? [])]
+                .sort((a, b) => chipRank(a.symbol) - chipRank(b.symbol) || a.symbol.localeCompare(b.symbol))
+                .map((item) => {
+                const selected = item.symbol === symbol;
+                const orderable = item.symbol === "BTC";
+                return (
+                  <button
+                    key={item.symbol}
+                    type="button"
+                    onClick={() => {
+                      setSymbol(item.symbol);
+                      setEntry("");
+                      setPending(null);
+                      setLastKey(null);
+                    }}
+                    className={
+                      "inline-flex h-10 shrink-0 items-center justify-center rounded-xl border px-3 text-xs font-medium whitespace-nowrap " +
+                      (orderable && selected
+                        ? "border-accent bg-accent/15 text-fg"
+                        : selected
+                          ? "border-line bg-raised text-fg"
+                          : "border-line bg-raised text-muted")
+                    }
+                  >
+                    {item.symbol}-PERP
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-xs text-muted">Orders stay on BTC-PERP. Other markets are read-only.</p>
+            <div className="mt-4 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-base font-semibold">{symbol}-PERP</p>
+                <p className="mt-1 text-xs text-muted">{quote ? formatAge(ageSec) : "No indexer row"}</p>
+              </div>
+              <p className="text-right font-mono text-lg font-medium">{mark ? formatPx(mark) : "—"}</p>
             </div>
             <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
-              <Pair k="Equity" v={formatPx(view.equity)} />
-              <Pair k="Unrealized" v={formatPx(view.pnl)} />
-              <Pair k="Maintenance" v={formatPx(view.mmReq)} />
-              <Pair k="Initial" v={formatPx(view.imReq)} />
-              <Pair k="Liq. price" v={view.liq == null ? "—" : formatPx(view.liq)} />
-              <Pair
-                k="Distance"
-                v={view.distance == null ? "—" : `${(view.distance * 100).toFixed(2)}%`}
-              />
+              <div>
+                <dt className="text-xs text-muted">Open interest</dt>
+                <dd className="mt-1 font-mono">{quote ? formatPx(quoteToNumber(quote.openInterest, quote.baseDecimals)) : "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted">Initial margin</dt>
+                <dd className="mt-1 font-mono">{quote ? `${(view.im / 100).toFixed(2)}%` : "—"}</dd>
+              </div>
             </dl>
-          </div>
-          <div className="rounded-xl border border-line bg-surface p-4">
-            <h2 className="text-sm font-medium">Action log</h2>
-            {log.length === 0 ? (
-              <p className="mt-3 text-sm text-muted">No check yet. Nothing is sent from this desk.</p>
-            ) : (
-              <ol className="mt-3 flex flex-col gap-2">
-                {log.map((line) => (
-                  <li key={line.id} className="border-l-2 border-line pl-3 text-sm leading-relaxed text-muted">
-                    <span className="font-mono text-xs text-accent">{line.kind}</span>
-                    <span className="mt-1 block text-fg">{line.text}</span>
-                  </li>
-                ))}
-              </ol>
-            )}
+            {quote && ageSec > STALE_SEC ? <p className="mt-3 text-sm text-warning">This mark is stale. It is not used as an order price.</p> : null}
+          </section>
+          <div className="order-6">
+            <WalletReview />
           </div>
         </div>
-      </div>
-      </details>
-    </main>
+
+        <details className={screen === "protection" ? "order-4 rounded-2xl border border-line bg-surface p-4" : "hidden"}>
+          <summary className="cursor-pointer text-sm font-semibold">What If? Simulation</summary>
+          <p className="mt-2 text-xs text-muted">Hypothetical desk math. Not the live account, and nothing is sent.</p>
+          <div className="mt-4 grid gap-4">
+            <form
+              className="flex flex-col gap-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                runCheck();
+              }}
+            >
+              <div className="grid grid-cols-2 gap-2">
+                {(["long", "short"] as const).map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => setSide(option)}
+                    className={
+                      "h-11 rounded-xl border font-medium capitalize " +
+                      (side === option ? "border-healthy bg-healthy/15 text-healthy" : "border-line text-muted")
+                    }
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+              <Field label="Size" value={size} onChange={setSize} />
+              <Field label="Entry" value={entry} onChange={setEntry} />
+              <Field label="Collateral USDso" value={collateral} onChange={setCollateral} />
+              <Field label="Maintenance bps" value={mmBps} onChange={setMmBps} />
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Reduce below" value={reduceBelow} onChange={setReduceBelow} />
+                <Field label="Flatten below" value={flattenBelow} onChange={setFlattenBelow} />
+                <Field label="Reduce %" value={reducePct} onChange={setReducePct} />
+                <Field label="Max reduce %" value={maxReducePct} onChange={setMaxReducePct} />
+              </div>
+              <button type="submit" className="h-12 rounded-xl bg-accent font-semibold text-ink">
+                Check protection
+              </button>
+              <button
+                type="button"
+                disabled={!pending}
+                onClick={applySimulatedFill}
+                className="h-11 rounded-xl border border-line font-medium text-fg disabled:opacity-40"
+              >
+                Apply simulated fill
+              </button>
+            </form>
+            <div className="rounded-xl border border-line bg-raised p-4">
+              <div className="flex items-baseline justify-between gap-3">
+                <h2 className="text-sm font-medium">New health ratio</h2>
+                <p className={"font-mono text-sm " + (stressed ? "text-danger" : "text-healthy")}>{view.band}</p>
+              </div>
+              <p className="mt-3 font-mono text-3xl font-medium">{ratioLabel}</p>
+              <p className="mt-1 text-sm text-muted">Equity over maintenance. 1.00× is the liquidation line.</p>
+              <div className="mt-4 h-2 overflow-hidden rounded-full bg-bg">
+                <div className={"h-full " + (stressed ? "bg-danger" : "bg-healthy")} style={{ width: `${bar}%` }} />
+              </div>
+              <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                <Pair k="Equity" v={formatPx(view.equity)} />
+                <Pair k="Unrealized" v={formatPx(view.pnl)} />
+                <Pair k="Maintenance" v={formatPx(view.mmReq)} />
+                <Pair k="Initial" v={formatPx(view.imReq)} />
+                <Pair k="Liq. price" v={view.liq == null ? "—" : formatPx(view.liq)} />
+                <Pair k="Distance" v={view.distance == null ? "—" : `${(view.distance * 100).toFixed(2)}%`} />
+              </dl>
+            </div>
+            <div>
+              <h2 className="text-sm font-medium">Action log</h2>
+              {log.length === 0 ? (
+                <p className="mt-3 text-sm text-muted">No check yet. Nothing is sent from this desk.</p>
+              ) : (
+                <ol className="mt-3 flex flex-col gap-2">
+                  {log.map((line) => (
+                    <li key={line.id} className="border-l-2 border-line pl-3 text-sm leading-relaxed text-muted">
+                      <span className="font-mono text-xs text-accent">{line.kind}</span>
+                      <span className="mt-1 block text-fg">{line.text}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+            <p className="rounded-xl border border-line bg-raised px-3 py-3 text-sm text-muted">
+              Use this to see how a typed scenario changes estimated health before taking action.
+            </p>
+          </div>
+        </details>
+      </main>
+      <BottomNav screen={screen} onChange={setScreen} />
+    </div>
   );
 }
 
-function ProtocolPanel() {
+function ProtocolPanel({ screen }: { screen: Screen }) {
   const [account, setAccount] = useState("");
   const [pending, setPending] = useState(false);
   const [watching, setWatching] = useState(false);
@@ -344,6 +350,7 @@ function ProtocolPanel() {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [includeWarning, setIncludeWarning] = useState(false);
   const [journal, setJournal] = useState<Journal>(emptyJournal());
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const bandRef = useRef<RiskBand | null>(null);
   const gate = useRef(createReadGate());
   const seq = useRef(0);
@@ -375,6 +382,7 @@ function ProtocolPanel() {
       }
       setError(null);
       setRead(result);
+      setUpdatedAt(Date.now());
       if (!result.account) return;
       const parsed = parseThresholds(limitsRef.current);
       if (!parsed.ok) return;
@@ -475,111 +483,196 @@ function ProtocolPanel() {
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-4">
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-        <h2 className="text-sm font-medium">Account monitor</h2>
-        <p className="font-mono text-xs text-muted">SDK 0.32.1 · read only · no signer</p>
-      </div>
-      <p className="text-sm leading-relaxed text-muted">
-        Health is equity over maintenance from the margin account, and only when that read matches account
-        health on one block. The scenario below is not used.
-      </p>
-      <input
-        value={account}
-        onChange={(event) => {
-          setAccount(event.target.value);
-          setWatching(false);
-        }}
-        placeholder="0x public address"
-        spellCheck={false}
-        className="h-11 rounded-lg border border-line bg-bg px-3 font-mono text-sm text-fg outline-none focus:border-accent"
-      />
-      <div className="grid grid-cols-3 gap-2">
-        <Field label="Warning below" value={warning} onChange={setWarning} />
-        <Field label="Danger below" value={danger} onChange={setDanger} />
-        <Field label="Critical below" value={critical} onChange={setCritical} />
-      </div>
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <label className="flex h-11 items-center gap-2 rounded-lg border border-line px-3 text-sm text-muted">
-          Refresh
-          <select
-            value={intervalSec}
-            onChange={(event) => setIntervalSec(Number(event.target.value))}
-            className="bg-transparent font-mono text-fg outline-none"
+    <>
+      <div className={screen === "dashboard" ? "flex flex-col gap-3" : "hidden"}>
+        <section className="rounded-2xl border border-line bg-surface p-4">
+          <h2 className="text-base font-semibold">Check Your Account</h2>
+          <p className="mt-1 text-sm leading-relaxed text-muted">Enter a public wallet address to monitor your dreamDEX account.</p>
+          <div className="mt-3 flex items-center gap-2 rounded-xl border border-line bg-raised px-3">
+            <input
+              value={account}
+              onChange={(event) => {
+                setAccount(event.target.value);
+                setWatching(false);
+              }}
+              placeholder="0x Your wallet address"
+              spellCheck={false}
+              aria-label="Public wallet address"
+              className="h-12 min-w-0 flex-1 bg-transparent font-mono text-sm text-fg outline-none placeholder:text-muted"
+            />
+            <button type="button" onClick={() => void navigator.clipboard?.writeText(account)} aria-label="Copy address" className="text-muted">
+              <Copy className="size-4" />
+            </button>
+          </div>
+          <button
+            type="button"
+            disabled={pending && !watching}
+            onClick={readAccount}
+            className="mt-3 h-12 w-full rounded-xl bg-accent text-sm font-semibold text-ink disabled:opacity-50"
           >
-            <option value={15}>15s</option>
-            <option value={30}>30s</option>
-            <option value={60}>60s</option>
-            <option value={120}>120s</option>
-          </select>
-        </label>
-        <button
-          type="button"
-          disabled={pending && !watching}
-          onClick={readAccount}
-          className="h-11 rounded-lg bg-accent px-4 font-medium text-bg disabled:opacity-50"
-        >
-          {pending ? "Reading…" : "Read account"}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            if (watching) {
+            {pending ? "Reading…" : "Check My Account"}
+          </button>
+          <div className="mt-3 flex items-center justify-between gap-3 text-sm text-muted">
+            <span className="flex items-center gap-1.5">
+              <Clock className="size-4" />
+              Auto refresh (monitoring)
+            </span>
+            <select
+              value={intervalSec}
+              onChange={(event) => setIntervalSec(Number(event.target.value))}
+              aria-label="Refresh interval"
+              className="h-9 rounded-lg border border-line bg-raised px-2 font-mono text-sm text-fg outline-none"
+            >
+              <option value={15}>15 seconds</option>
+              <option value={30}>30 seconds</option>
+              <option value={60}>60 seconds</option>
+              <option value={120}>120 seconds</option>
+            </select>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-line bg-surface p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold">Account Health</h2>
+            <p className="flex items-center gap-1.5 text-xs text-muted">
+              <span className={"size-1.5 rounded-full " + (assessment ? "bg-healthy" : "bg-muted")} />
+              {updatedAt ? `Last updated ${new Date(updatedAt).toLocaleTimeString()}` : "Not read yet"}
+            </p>
+          </div>
+          {assessment ? (
+            <HealthCard assessment={assessment} />
+          ) : (
+            <p className="mt-4 text-sm text-muted">
+              {read?.account ? "This snapshot has no comparable health." : "Check an account to see health. No sample balance is shown."}
+            </p>
+          )}
+        </section>
+
+        <section className="rounded-2xl border border-line bg-surface p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold">Your Positions</h2>
+            <span className="rounded-full bg-raised px-2 py-1 text-xs text-muted">
+              {assessment ? `${assessment.positions.filter((position) => position.direction !== "flat").length} open` : "—"}
+            </span>
+          </div>
+          {assessment && assessment.positions.filter((position) => position.direction !== "flat").length > 0 ? (
+            <ul className="mt-3 flex flex-col gap-3">
+              {assessment.positions
+                .filter((position) => position.direction !== "flat")
+                .map((position) => (
+                  <li key={position.symbol} className="rounded-xl border border-line bg-raised p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-semibold">{position.symbol}-PERP</p>
+                      <span className={"rounded-full px-2 py-0.5 text-xs font-medium " + (position.direction === "long" ? "bg-healthy/15 text-healthy" : "bg-danger/15 text-danger")}>
+                        {position.direction === "long" ? "Long" : "Short"}
+                      </span>
+                    </div>
+                    <dl className="mt-3 grid grid-cols-3 gap-2 text-sm">
+                      <Pair k="Size" v={position.size} />
+                      <Pair k="Entry" v={position.entry ?? "—"} />
+                      <Pair k="Mark" v={position.mark ?? "—"} />
+                    </dl>
+                    <p className="mt-2 font-mono text-xs text-muted">{liquidationText(position.liquidation)}</p>
+                  </li>
+                ))}
+            </ul>
+          ) : (
+            <p className="mt-3 text-sm text-muted">No open position was returned.</p>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              if (watching) {
+                setWatching(false);
+                return;
+              }
+              const parsed = parsePublicAddress(account);
+              if (!parsed.ok) {
+                setError(parsed.error);
+                return;
+              }
+              if (!limits.ok) {
+                setError(limits.error);
+                return;
+              }
+              setError(null);
+              setWatching(true);
+            }}
+            className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-accent font-semibold text-accent"
+          >
+            <Play className="size-4" />
+            {watching ? "Stop Monitoring" : "Start Monitoring"}
+          </button>
+          <p className="mt-2 text-center text-xs text-muted">
+            {watching ? "Guardian is re-reading this public account." : "Guardian will keep checking your account health."}
+          </p>
+        </section>
+
+        <details className="rounded-2xl border border-line bg-surface p-4">
+          <summary className="cursor-pointer text-sm font-medium">Thresholds and monitor log</summary>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <Field label="Warning below" value={warning} onChange={setWarning} />
+            <Field label="Danger below" value={danger} onChange={setDanger} />
+            <Field label="Critical below" value={critical} onChange={setCritical} />
+          </div>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => {
               setWatching(false);
-              return;
-            }
-            const parsed = parsePublicAddress(account);
-            if (!parsed.ok) {
-              setError(parsed.error);
-              return;
-            }
-            if (!limits.ok) {
-              setError(limits.error);
-              return;
-            }
-            setError(null);
-            setWatching(true);
-          }}
-          className="h-11 rounded-lg border border-line px-4 font-medium text-fg"
-        >
-          {watching ? "Stop watch" : "Watch"}
-        </button>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() => {
-            setWatching(false);
-            void pull("");
-          }}
-          className="h-11 rounded-lg border border-line px-4 font-medium text-fg disabled:opacity-50"
-        >
-          Markets only
-        </button>
+              void pull("");
+            }}
+            className="mt-3 h-11 rounded-xl border border-line px-4 text-sm font-medium disabled:opacity-50"
+          >
+            Markets only
+          </button>
+          {!limits.ok ? <p className="mt-2 text-sm text-danger">{limits.error}</p> : null}
+          {events.length === 0 ? (
+            <p className="mt-3 text-sm text-muted">No account read yet. Nothing is sent.</p>
+          ) : (
+            <ol className="mt-3 flex flex-col gap-2">
+              {events.map((line) => (
+                <li key={line.id} className="border-l-2 border-line pl-3 text-sm text-fg">
+                  {line.message}
+                </li>
+              ))}
+            </ol>
+          )}
+        </details>
+        {error ? <p className="text-sm text-danger">{error}</p> : null}
+        {read ? (
+          <p className="font-mono text-xs text-muted">
+            chain {read.chainId} · signer none · bank {short(read.system.marginBank)}
+          </p>
+        ) : null}
       </div>
-      <div className="rounded-lg border border-dashed border-line p-3">
-        <p className="font-mono text-xs tracking-widest text-accent">NO SIGNER · NO SEND</p>
-        <p className="mt-1 text-sm text-muted">
-          Demonstration can preview a healthy position. Protection only proposes at danger or critical. Neither path can submit.
-        </p>
+
+      <section className={screen === "protection" ? "order-3 rounded-2xl border border-line bg-surface p-4" : "hidden"}>
+        <h2 className="text-base font-semibold">Recommended Actions</h2>
+        <p className="mt-1 text-sm text-muted">Unsigned previews only. Neither path can submit, grant, or arm a stop.</p>
         <div className="mt-3 grid grid-cols-2 gap-2">
           <Field label="Requested reduction %" value={requestedPct} onChange={setRequestedPct} />
           <Field label="Max reduction %" value={maxPct} onChange={setMaxPct} />
         </div>
         <label className="mt-3 flex items-center gap-2 text-sm text-muted">
-          <input
-            type="checkbox"
-            checked={includeWarning}
-            onChange={(event) => setIncludeWarning(event.target.checked)}
-          />
+          <input type="checkbox" checked={includeWarning} onChange={(event) => setIncludeWarning(event.target.checked)} />
           Protection may also propose on warning
         </label>
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-          <button type="button" disabled={previewing || journal.disarmed} onClick={() => runPreview("demo")} className="h-11 rounded-lg border border-line px-4 font-medium text-fg disabled:opacity-50">
-            {previewing ? "Previewing…" : "Demo preview"}
-          </button>
-          <button type="button" disabled={previewing || journal.disarmed} onClick={() => runPreview("protection")} className="h-11 rounded-lg border border-line px-4 font-medium text-fg disabled:opacity-50">
-            Protection preview
-          </button>
+        <div className="mt-3 flex flex-col gap-2">
+          <ActionRow
+            title={proposals?.[0]?.label ?? "Reduce position"}
+            detail="Preview a reduction. Nothing is sent."
+            disabled={previewing || journal.disarmed}
+            onClick={() => runPreview("protection")}
+            label={previewing ? "Previewing…" : "Preview"}
+          />
+          <ActionRow
+            title="Demonstration preview"
+            detail="Can preview a healthy position. Still unsigned."
+            disabled={previewing || journal.disarmed}
+            onClick={() => runPreview("demo")}
+            label="Preview"
+          />
           <button
             type="button"
             onClick={() => {
@@ -587,17 +680,17 @@ function ProtocolPanel() {
               setJournal(next);
               window.localStorage.setItem("guardian.execution.journal", serializeJournal(next));
             }}
-            className="h-11 rounded-lg border border-line px-4 font-medium text-accent"
+            className="h-11 rounded-xl border border-line text-sm font-medium text-warning"
           >
             Disarm
           </button>
         </div>
-        {journal.disarmed ? <p className="mt-2 text-sm text-accent">Disarmed. New previews are refused.</p> : null}
-        {previewError ? <p className="mt-2 text-sm text-accent">{previewError}</p> : null}
+        {journal.disarmed ? <p className="mt-2 text-sm text-warning">Disarmed. New previews are refused.</p> : null}
+        {previewError ? <p className="mt-2 text-sm text-danger">{previewError}</p> : null}
         {proposals ? (
           <ul className="mt-3 flex flex-col gap-3">
             {proposals.map((proposal) => (
-              <li key={`${proposal.pool}-${proposal.market}-${proposal.intentId ?? proposal.state}`} className="rounded-lg border border-line bg-bg px-3 py-3 text-sm">
+              <li key={`${proposal.pool}-${proposal.market}-${proposal.intentId ?? proposal.state}`} className="rounded-xl border border-line bg-raised px-3 py-3 text-sm">
                 <p className="font-mono text-xs text-accent">{proposal.label} · {proposal.state}</p>
                 <dl className="mt-2 grid grid-cols-2 gap-2">
                   <Pair k="Account" v={short(proposal.account)} />
@@ -616,25 +709,8 @@ function ProtocolPanel() {
             ))}
           </ul>
         ) : null}
-      </div>
-      {!limits.ok ? <p className="text-sm text-accent">{limits.error}</p> : null}
-      {error ? <p className="text-sm text-accent">{error}</p> : null}
-      {read ? <ProtocolBody read={read} assessment={assessment} /> : null}
-      <div>
-        <h3 className="text-sm font-medium">Monitor log</h3>
-        {events.length === 0 ? (
-          <p className="mt-2 text-sm text-muted">No account read yet. Nothing is sent.</p>
-        ) : (
-          <ol className="mt-2 flex flex-col gap-2">
-            {events.map((line) => (
-              <li key={line.id} className="border-l-2 border-line pl-3 text-sm text-fg">
-                {line.message}
-              </li>
-            ))}
-          </ol>
-        )}
-      </div>
-    </section>
+      </section>
+    </>
   );
 }
 
@@ -662,61 +738,46 @@ function toSnapshot(read: ProtocolRead): AccountSnapshot {
   };
 }
 
-function ProtocolBody({ read, assessment }: { read: ProtocolRead; assessment: Assessment | null }) {
+function HealthCard({ assessment }: { assessment: Assessment }) {
+  const tone = bandTone(assessment.band);
+  const ratio = assessment.ratio == null ? null : Number(assessment.ratio);
+  const width = ratio != null && Number.isFinite(ratio) ? Math.max(6, Math.min(100, (ratio / 3.5) * 100)) : 6;
   return (
-    <div className="flex flex-col gap-3">
-      <p className="font-mono text-xs text-muted">
-        chain {read.chainId} · signer {read.signerConnected ? "yes" : "none"} · bank {short(read.system.marginBank)}
-      </p>
-      <div className="grid gap-2 sm:grid-cols-3">
-        {read.markets.map((market) => (
-          <div key={market.symbol} className="rounded-lg border border-line bg-bg px-3 py-3">
-            <p className="text-sm font-medium">{market.symbol}</p>
-            <p className="mt-1 font-mono text-sm text-fg">
-              {market.health.priceable ? formatPx(quoteToNumber(market.health.markPrice)) : "unpriceable"}
-            </p>
-            <p className="mt-1 font-mono text-xs text-muted">
-              MM {Number(market.risk.maintenanceMarginBps) / 100}%
-              {market.health.priceable ? "" : " · mark withheld"}
-            </p>
-          </div>
-        ))}
-      </div>
-      {assessment ? (
-        <div className="rounded-lg border border-line bg-bg px-3 py-3">
-          <div className="flex items-baseline justify-between gap-3">
-            <p className="font-mono text-xs text-muted">{read.account?.address}</p>
-            <p className="font-mono text-sm text-accent">{assessment.band}</p>
-          </div>
-          <p className="mt-2 font-mono text-3xl">{assessment.ratio ? `${assessment.ratio}×` : "—"}</p>
-          <p className="mt-1 text-sm text-muted">{assessment.reason}</p>
-          <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
-            <Pair k="Equity" v={formatPx(quoteToNumber(assessment.equity))} />
-            <Pair k="Maintenance" v={formatPx(quoteToNumber(assessment.mmReq))} />
-          </dl>
-          <ul className="mt-3 flex flex-col gap-3">
-            {assessment.positions.length === 0 ? (
-              <li className="text-sm text-muted">No active perp pools.</li>
-            ) : (
-              assessment.positions.map((position) => (
-                <li key={position.symbol} className="text-sm">
-                  <p className="font-medium">
-                    {position.symbol} · {position.direction}
-                  </p>
-                  <p className="font-mono text-xs text-muted">
-                    size {position.size} · entry {position.entry ?? "—"} · mark {position.mark ?? "—"}
-                  </p>
-                  <p className="font-mono text-xs text-muted">{liquidationText(position.liquidation)}</p>
-                </li>
-              ))
-            )}
-          </ul>
+    <div className="mt-4">
+      <div className="flex items-center gap-3">
+        <span className={"grid size-11 place-items-center rounded-full bg-raised " + tone.text}>
+          <Shield className="size-5" />
+        </span>
+        <div>
+          <p className={"text-2xl font-semibold " + tone.text}>{tone.label}</p>
+          <p className="text-sm text-muted">{assessment.reason}</p>
         </div>
-      ) : (
-        <p className="text-sm text-muted">No account in this snapshot.</p>
-      )}
+      </div>
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-raised">
+        <div className={"h-full rounded-full " + tone.bar} style={{ width: `${width}%` }} />
+      </div>
+      <dl className="mt-4 grid grid-cols-3 gap-2">
+        <Pair k="Health Ratio" v={assessment.ratio ? `${assessment.ratio}×` : "—"} />
+        <Pair k="Margin Equity" v={formatPx(quoteToNumber(assessment.equity))} />
+        <Pair k="Maintenance" v={formatPx(quoteToNumber(assessment.mmReq))} />
+      </dl>
     </div>
   );
+}
+
+function bandTone(band: RiskBand): { label: string; text: string; bar: string } {
+  if (band === "clear") return { label: "Healthy", text: "text-healthy", bar: "bg-healthy" };
+  if (band === "warning") return { label: "Warning", text: "text-warning", bar: "bg-warning" };
+  if (band === "danger") return { label: "Danger", text: "text-danger", bar: "bg-danger" };
+  if (band === "critical") return { label: "Critical", text: "text-danger", bar: "bg-danger" };
+  return { label: "Unavailable", text: "text-muted", bar: "bg-line" };
+}
+
+function chipRank(symbol: string): number {
+  if (symbol === "BTC") return 0;
+  if (symbol === "ETH") return 1;
+  if (symbol === "SOL") return 2;
+  return 3;
 }
 
 function liquidationText(view: Assessment["positions"][number]["liquidation"]): string {
@@ -731,12 +792,77 @@ function short(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-function Stat({ label, value, hint, warn }: { label: string; value: string; hint: string; warn?: boolean }) {
+function AppHeader() {
   return (
-    <div className="rounded-xl border border-line bg-surface px-3 py-3">
-      <p className="text-xs text-muted">{label}</p>
-      <p className="mt-1 truncate font-mono text-lg text-fg">{value}</p>
-      <p className={"mt-1 font-mono text-xs " + (warn ? "text-accent" : "text-muted")}>{hint}</p>
+    <header className="flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2">
+        <span className="grid size-9 place-items-center rounded-full border border-accent/40 text-accent">
+          <Shield className="size-4" />
+        </span>
+        <div>
+          <h1 className="text-[15px] font-semibold leading-tight">Liquidation Guardian</h1>
+          <p className="text-[11px] text-muted">Your futures risk companion</p>
+        </div>
+      </div>
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] text-fg">
+        <span className="size-1.5 rounded-full bg-healthy" />
+        Somnia Testnet
+      </span>
+    </header>
+  );
+}
+
+function BottomNav({ screen, onChange }: { screen: Screen; onChange: (screen: Screen) => void }) {
+  const items: Array<{ id: Screen; label: string; icon: typeof Home }> = [
+    { id: "dashboard", label: "Dashboard", icon: Home },
+    { id: "protection", label: "Protection", icon: Shield },
+    { id: "trade", label: "Testnet Trade", icon: ChartNoAxesColumn },
+  ];
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-bg/95 backdrop-blur">
+      <div className="mx-auto flex max-w-[430px] items-stretch justify-around px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
+        {items.map((item) => {
+          const active = screen === item.id;
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onChange(item.id)}
+              className={"flex min-h-12 flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium " + (active ? "text-accent" : "text-muted")}
+            >
+              <Icon className="size-5" />
+              {item.label}
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+function ActionRow({
+  title,
+  detail,
+  label,
+  disabled,
+  onClick,
+}: {
+  title: string;
+  detail: string;
+  label: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-raised px-3 py-3">
+      <div>
+        <p className="text-sm font-medium">{title}</p>
+        <p className="text-xs text-muted">{detail}</p>
+      </div>
+      <button type="button" disabled={disabled} onClick={onClick} className="h-9 shrink-0 rounded-lg border border-danger/60 px-3 text-sm font-medium text-danger disabled:opacity-50">
+        {label}
+      </button>
     </div>
   );
 }

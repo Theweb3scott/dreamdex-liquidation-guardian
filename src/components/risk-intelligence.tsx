@@ -80,7 +80,7 @@ export function RiskIntelligence({ book, walletChainId }: { book: IntelBook; wal
 
       <section className="rounded-xl border border-dashed border-line bg-surface p-4">
         <p className="font-mono text-xs tracking-widest text-accent">WHAT-IF · ESTIMATE ONLY</p>
-        <h3 className="mt-1 text-lg font-semibold">Scenario</h3>
+        <h3 className="mt-1 text-lg font-semibold">What If? Simulation</h3>
         <p className="mt-2 text-sm text-muted">Nothing here is sent, deposited, withdrawn, or reduced. Estimated health is not a protocol classification.</p>
         {result && !current ? <p className="mt-2 text-sm text-accent">This scenario belongs to a different account or network and was discarded.</p> : null}
         <div className="mt-3 flex flex-col gap-3">

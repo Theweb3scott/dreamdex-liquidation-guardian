@@ -204,17 +204,13 @@ export function WalletReview() {
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-4">
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-        <h2 className="text-sm font-medium">Execution review</h2>
-        <p className="font-mono text-xs text-accent">BROWSER WALLET · SEND DISABLED</p>
+    <section className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
+      <div>
+        <h2 className="text-base font-semibold">Execution review</h2>
+        <p className="mt-1 text-xs text-muted">Browser wallet. This review cannot send. Chain 50383 is checked against Hideki v2.</p>
       </div>
-      <p className="text-sm leading-relaxed text-muted">
-        The monitor above stays a public read. This section asks a browser wallet for an address and chain only.
-        Quotes are read from the Hideki v2 RPC, because chain 50383 is not a unique deployment. Nothing is signed or sent.
-      </p>
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <button type="button" onClick={() => void connect()} className="h-11 rounded-lg bg-accent px-4 font-medium text-bg">
+      <div className="flex flex-col gap-2">
+        <button type="button" onClick={() => void connect()} className="h-12 rounded-xl bg-accent text-sm font-semibold text-ink">
           {session.address ? "Reconnect wallet" : "Connect wallet"}
         </button>
         {session.address && session.chainId !== HIDEKI_CHAIN_ID ? (

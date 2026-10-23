@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import ShieldCheck from "lucide-react/dist/esm/icons/shield-check";
+import TriangleAlert from "lucide-react/dist/esm/icons/triangle-alert";
 import { readGuardianShield } from "@/lib/guardian/protocol";
 import { allowWalletMethod, HIDEKI_CHAIN_ID } from "@/lib/guardian/review";
 import { diffShield, localPreviewEvent, shieldHelp, shieldLayout, type ActivityEvent, type ShieldModel } from "@/lib/guardian/shield";
@@ -79,54 +81,92 @@ export function GuardianShield() {
     }
   }
 
-  return (
-    <section className="flex flex-col gap-4" data-columns={layout.columns}>
-      <div className="flex flex-col gap-1">
-        <p className="font-mono text-xs tracking-widest text-accent">GUARDIAN SHIELD · READ ONLY</p>
-        <h2 className="text-xl font-semibold tracking-tight">Account protection</h2>
-        <p className="max-w-2xl text-sm leading-relaxed text-muted">
-          Live protocol values only. Blank fields were not returned. Nothing on this screen can sign, grant a permission, or arm a stop.
-        </p>
-      </div>
+  const tone = model == null ? "idle" : model.band === "SAFE" ? "healthy" : model.band === "WARNING" ? "warning" : model.band === "UNKNOWN" ? "idle" : "danger";
 
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <button type="button" onClick={() => void connect()} className="h-11 rounded-lg bg-accent px-4 font-medium text-bg">
-          {address ? "Reconnect wallet" : "Connect wallet"}
-        </button>
-        <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted">
-          Public address
+  return (
+    <section className="flex flex-col gap-3" data-columns={layout.columns}>
+      <div className="rounded-2xl border border-line bg-surface p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="size-5 text-healthy" />
+            <h2 className="text-base font-semibold">Guardian Shield</h2>
+          </div>
+          <span className={"rounded-full px-2.5 py-1 text-xs font-medium " + (model ? "bg-healthy/15 text-healthy" : "bg-raised text-muted")}>
+            {model ? "Active" : "Not read"}
+          </span>
+        </div>
+        <p className="mt-2 text-sm text-muted">Monitor your risk and get suggested actions before liquidation.</p>
+        <div className="mt-3 flex gap-3 rounded-xl border border-line bg-raised px-3 py-3">
+          <ShieldCheck className="mt-0.5 size-5 shrink-0 text-healthy" />
+          <div>
+            <p className="text-sm font-medium">No automatic trades</p>
+            <p className="text-xs text-muted">Guardian only suggests protective actions. You stay in control.</p>
+          </div>
+        </div>
+        <div className="mt-3 flex flex-col gap-2">
           <input
             value={address}
             onChange={(event) => setAddress(event.target.value)}
             placeholder="0x public address"
             spellCheck={false}
-            className="h-11 rounded-lg border border-line bg-bg px-3 font-mono text-sm text-fg outline-none focus:border-accent"
+            aria-label="Shield public address"
+            className="h-11 rounded-xl border border-line bg-raised px-3 font-mono text-sm outline-none focus:border-accent"
           />
-        </label>
-        <button
-          type="button"
-          disabled={loading || address.trim() === ""}
-          onClick={() => void load(address)}
-          className="h-11 rounded-lg border border-line px-4 font-medium text-fg disabled:opacity-50"
-        >
-          {loading ? "Reading…" : "Refresh shield"}
-        </button>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => void connect()} className="h-11 flex-1 rounded-xl border border-line text-sm font-medium">
+              {address ? "Reconnect wallet" : "Connect wallet"}
+            </button>
+            <button
+              type="button"
+              disabled={loading || address.trim() === ""}
+              onClick={() => void load(address)}
+              className="h-11 flex-1 rounded-xl bg-accent text-sm font-semibold text-ink disabled:opacity-50"
+            >
+              {loading ? "Reading…" : "Refresh shield"}
+            </button>
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-muted">
+          {address
+            ? `${address} · wallet chain ${chainId ?? "not read"} · Hideki v2 read`
+            : "No wallet required. A public address is enough."}
+          {chainId != null && chainId !== HIDEKI_CHAIN_ID ? " · wallet is not on chain 50383" : ""}
+        </p>
+        {walletError ? <p className="mt-2 text-sm text-danger">{walletError}</p> : null}
+        {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
       </div>
-      <p className="text-sm text-muted">
-        {address
-          ? `${address} · wallet chain ${chainId ?? "not read"} · quotes come from Hideki v2, not from the wallet node`
-          : "No wallet connected. A public address is enough for a read."}
-        {chainId != null && chainId !== HIDEKI_CHAIN_ID ? " · wallet is not on chain 50383" : ""}
-      </p>
-      {walletError ? <p className="text-sm text-accent">{walletError}</p> : null}
-      {error ? <p className="rounded-lg border border-line bg-surface px-3 py-3 text-sm text-accent">{error}</p> : null}
+
+      {model ? (
+        <div
+          className={
+            "flex gap-3 rounded-2xl border px-3 py-3 " +
+            (tone === "warning"
+              ? "border-warning/50 bg-warning/10"
+              : tone === "danger"
+                ? "border-danger/50 bg-danger/10"
+                : tone === "healthy"
+                  ? "border-healthy/40 bg-healthy/10"
+                  : "border-line bg-surface")
+          }
+        >
+          <TriangleAlert className={"size-5 shrink-0 " + (tone === "healthy" ? "text-healthy" : tone === "warning" ? "text-warning" : "text-danger")} />
+          <div>
+            <p className={"font-semibold " + (tone === "healthy" ? "text-healthy" : tone === "warning" ? "text-warning" : tone === "danger" ? "text-danger" : "text-fg")}>
+              {model.band === "SAFE" ? "Healthy" : model.band === "WARNING" ? "Warning" : model.band === "DANGER" ? "Danger" : model.band === "CRITICAL" ? "Critical" : "Unavailable"}
+            </p>
+            <p className="text-sm text-muted">{model.bandReason}</p>
+          </div>
+        </div>
+      ) : (
+        <p className="rounded-2xl border border-line bg-surface px-4 py-4 text-sm text-muted">Read an account to see risk. No sample health is shown.</p>
+      )}
 
       {model ? <ShieldBody model={model} columns={layout.columns} timeline={timeline} /> : null}
       {intel ? <RiskIntelligence key={`${intel.address}:${intel.chainId}:${intel.refreshedAt}`} book={intel} walletChainId={chainId} /> : null}
 
-      <details className="rounded-xl border border-line bg-surface p-4">
+      <details className="rounded-2xl border border-line bg-surface p-4">
         <summary className="cursor-pointer text-sm font-medium">What these words mean</summary>
-        <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+        <dl className="mt-3 grid gap-3 text-sm">
           {Object.entries(HELP).map(([key, text]) => (
             <div key={key}>
               <dt className="font-medium capitalize text-fg">{key}</dt>
