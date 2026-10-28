@@ -87,6 +87,7 @@ export type ManualQuote = {
   takerFeeRate: string;
   bestBidDisplay: string;
   bestAskDisplay: string;
+  markDisplay: string;
   block: string;
   deploymentId: typeof HIDEKI_V2_ID;
   chainId: typeof HIDEKI_CHAIN_ID;
@@ -258,6 +259,7 @@ export function assessManualOrder(facts: ManualFacts): { ok: true; quote: Manual
       takerFeeRate: facts.takerFeeBpsTimes1k.toString(),
       bestBidDisplay: facts.bestBid == null ? "none" : formatRaw(facts.bestBid, facts.quoteDecimals),
       bestAskDisplay: facts.bestAsk == null ? "none" : formatRaw(facts.bestAsk, facts.quoteDecimals),
+      markDisplay: facts.markPrice > 0n ? formatRaw(facts.markPrice, facts.quoteDecimals) : "missing",
       block: facts.block,
       deploymentId: HIDEKI_V2_ID,
       chainId: HIDEKI_CHAIN_ID,

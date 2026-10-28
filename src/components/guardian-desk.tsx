@@ -5,7 +5,6 @@ import Copy from "lucide-react/dist/esm/icons/copy";
 import Home from "lucide-react/dist/esm/icons/home";
 import Play from "lucide-react/dist/esm/icons/play";
 import Shield from "lucide-react/dist/esm/icons/shield";
-import { WalletReview } from "@/components/wallet-review";
 import { useAppWallet } from "@/components/app-wallet";
 import { ManualTestOrder } from "@/components/manual-order";
 import { GuardianShield } from "@/components/guardian-shield";
@@ -99,6 +98,9 @@ export function GuardianDesk() {
   const mark = quote ? quoteToNumber(quote.mark) : 0;
   const index = quote ? quoteToNumber(quote.index) : 0;
   const ageSec = quote?.markUpdatedAt ? now / 1000 - quote.markUpdatedAt : Number.POSITIVE_INFINITY;
+  const btcQuote = quotes?.find((q) => q.symbol === "BTC") ?? null;
+  const btcMark = btcQuote ? quoteToNumber(btcQuote.mark) : 0;
+  const btcAge = btcQuote?.markUpdatedAt ? now / 1000 - btcQuote.markUpdatedAt : Number.POSITIVE_INFINITY;
 
   useEffect(() => {
     if (mark > 0) setEntry((current) => (current === "" ? String(roundInput(mark)) : current));
@@ -176,69 +178,13 @@ export function GuardianDesk() {
         </div>
 
         <div className={screen === "trade" ? "flex flex-col gap-3" : "hidden"}>
-          <ManualTestOrder symbol={symbol} indexerStale={Boolean(quote && ageSec > STALE_SEC)} />
-          <section className="order-2 rounded-2xl border border-line bg-surface p-4">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-base font-semibold">Select Market</h2>
-              <p className="flex items-center gap-1.5 text-xs text-muted">
-                <span className={"size-1.5 rounded-full " + (loadError ? "bg-danger" : "bg-healthy")} />
-                {quotes === null ? "Loading" : loadError ? "Indexer unavailable" : "Live prices (testnet)"}
-              </p>
-            </div>
-            {loadError ? <p className="mt-3 text-sm text-danger">{loadError}</p> : null}
-            <div className="mt-3 flex min-w-0 gap-2 overflow-x-auto pb-1">
-              {[...(quotes ?? [])]
-                .sort((a, b) => chipRank(a.symbol) - chipRank(b.symbol) || a.symbol.localeCompare(b.symbol))
-                .map((item) => {
-                const selected = item.symbol === symbol;
-                const orderable = item.symbol === "BTC";
-                return (
-                  <button
-                    key={item.symbol}
-                    type="button"
-                    onClick={() => {
-                      setSymbol(item.symbol);
-                      setEntry("");
-                      setPending(null);
-                      setLastKey(null);
-                    }}
-                    className={
-                      "inline-flex h-10 shrink-0 items-center justify-center rounded-xl border px-3 text-xs font-medium whitespace-nowrap " +
-                      (orderable && selected
-                        ? "border-accent bg-accent/15 text-fg"
-                        : selected
-                          ? "border-line bg-raised text-fg"
-                          : "border-line bg-raised text-muted")
-                    }
-                  >
-                    {item.symbol}-PERP
-                  </button>
-                );
-              })}
-            </div>
-            <p className="mt-2 text-xs text-muted">Orders stay on BTC-PERP. Other markets are read-only.</p>
-            <div className="mt-4 flex items-start justify-between gap-3">
-              <div>
-                <p className="text-base font-semibold">{symbol}-PERP</p>
-                <p className="mt-1 text-xs text-muted">{quote ? formatAge(ageSec) : "No indexer row"}</p>
-              </div>
-              <p className="text-right font-mono text-lg font-medium">{mark ? formatPx(mark) : "—"}</p>
-            </div>
-            <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <dt className="text-xs text-muted">Open interest</dt>
-                <dd className="mt-1 font-mono">{quote ? formatPx(quoteToNumber(quote.openInterest, quote.baseDecimals)) : "—"}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-muted">Initial margin</dt>
-                <dd className="mt-1 font-mono">{quote ? `${(view.im / 100).toFixed(2)}%` : "—"}</dd>
-              </div>
-            </dl>
-            {quote && ageSec > STALE_SEC ? <p className="mt-3 text-sm text-warning">This mark is stale. It is not used as an order price.</p> : null}
-          </section>
-          <div className="order-6">
-            <WalletReview />
-          </div>
+          <ManualTestOrder
+            symbol="BTC"
+            indexerStale={Boolean(btcQuote && btcAge > STALE_SEC)}
+            indexerMark={btcMark > 0 ? formatPx(btcMark) : null}
+            indexerAge={btcQuote ? formatAge(btcAge) : null}
+            indexerError={loadError}
+          />
         </div>
 
         <details className={screen === "protection" ? "order-4 rounded-2xl border border-line bg-surface p-4" : "hidden"}>
@@ -789,13 +735,6 @@ function bandTone(band: RiskBand): { label: string; text: string; bar: string } 
   if (band === "danger") return { label: "Danger", text: "text-danger", bar: "bg-danger" };
   if (band === "critical") return { label: "Critical", text: "text-danger", bar: "bg-danger" };
   return { label: "Unavailable", text: "text-muted", bar: "bg-line" };
-}
-
-function chipRank(symbol: string): number {
-  if (symbol === "BTC") return 0;
-  if (symbol === "ETH") return 1;
-  if (symbol === "SOL") return 2;
-  return 3;
 }
 
 function liquidationText(view: Assessment["positions"][number]["liquidation"]): string {

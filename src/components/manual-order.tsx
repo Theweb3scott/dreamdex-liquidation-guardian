@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { HIDEKI_CHAIN_ID } from "@/lib/guardian/review";
 import { useAppWallet } from "@/components/app-wallet";
-import { networkLabel, tradingSessionKey } from "@/lib/guardian/app-wallet";
+import { networkLabel, shortAddress, tradingSessionKey } from "@/lib/guardian/app-wallet";
 import { MANUAL_LEDGER_KEY, parseLedger, quoteFresh, reviewPreconditions, submissionBlock, type ManualLedger, type ManualQuote, type OrderObservation } from "@/lib/guardian/manual-order";
 import type { ManualSubmit } from "@/lib/guardian/manual-order-client";
+import { confirmAllowed, plainTradeCopy, shownValue, tradeResultCopy, type TradePhase } from "@/lib/guardian/trade-copy";
 
 type Eip1193 = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
@@ -11,16 +12,25 @@ type Eip1193 = {
   removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
 };
 
-type Phase = "idle" | "reading" | "ready" | "signing" | "done";
-
-export function ManualTestOrder({ symbol = "BTC", indexerStale = false }: { symbol?: string; indexerStale?: boolean }) {
+export function ManualTestOrder({
+  symbol = "BTC",
+  indexerStale = false,
+  indexerMark = null,
+  indexerAge = null,
+  indexerError = null,
+}: {
+  symbol?: string;
+  indexerStale?: boolean;
+  indexerMark?: string | null;
+  indexerAge?: string | null;
+  indexerError?: string | null;
+}) {
   const shared = useAppWallet();
   const address = shared.wallet.address;
   const chainId = shared.wallet.chainId;
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const [quote, setQuote] = useState<ManualQuote | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
-  const [phase, setPhase] = useState<Phase>("idle");
+  const [phase, setPhase] = useState<TradePhase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [observed, setObserved] = useState<OrderObservation | null>(null);
   const [result, setResult] = useState<ManualSubmit | null>(null);
@@ -67,7 +77,8 @@ export function ManualTestOrder({ symbol = "BTC", indexerStale = false }: { symb
     seenSession.current = sessionKey;
     setQuote(null);
     setObserved(null);
-    setConfirmed(false);
+    setResult(null);
+    setError(null);
     setPhase((current) => (current === "signing" ? current : "idle"));
   }, [sessionKey]);
 
@@ -80,10 +91,13 @@ export function ManualTestOrder({ symbol = "BTC", indexerStale = false }: { symb
   function chooseSide(next: "buy" | "sell") {
     if (phase === "signing") return;
     setSide(next);
+    clearPreview();
+  }
+
+  function clearPreview() {
+    if (phase === "signing") return;
     setQuote(null);
     setObserved(null);
-    setConfirmed(false);
-    setResult(null);
     setError(null);
     setPhase("idle");
   }
@@ -100,7 +114,6 @@ export function ManualTestOrder({ symbol = "BTC", indexerStale = false }: { symb
     setPhase("reading");
     setError(null);
     setResult(null);
-    setConfirmed(false);
     try {
       const { prepareManualQuote } = await import("@/lib/guardian/manual-order-client");
       const read = await prepareManualQuote(address as string, side);
@@ -123,8 +136,8 @@ export function ManualTestOrder({ symbol = "BTC", indexerStale = false }: { symb
   }
 
   async function sign() {
-    if (!quote || !confirmed || !quoteFresh(quote, Date.now())) {
-      setError("Read a fresh quote and confirm it before the wallet is asked to sign.");
+    if (!quote || !quoteFresh(quote, Date.now())) {
+      setError("The quote expired. Read it again before signing.");
       return;
     }
     const eth = provider();
@@ -172,155 +185,156 @@ export function ManualTestOrder({ symbol = "BTC", indexerStale = false }: { symb
   const fresh = quote != null && quoteFresh(quote, Date.now());
   const hold = storageError ?? submissionBlock(ledger, quote?.intentId ?? "");
   const unresolved = ledger.intents.filter((row) => row.phase === "pending" || row.phase === "unknown");
+  const allowed = confirmAllowed({
+    hasQuote: quote != null,
+    fresh,
+    blocked: Boolean(hold),
+    recovering,
+    phase,
+    outcome: result?.outcome ?? null,
+  });
+  const copy = error ? plainTradeCopy(error) : quote && !fresh ? plainTradeCopy("The quote expired. Read it again before signing.") : hold ? plainTradeCopy(hold) : null;
+  const showReview = phase === "reading" || error != null || quote != null || observed != null;
+  const walletLine = !address
+    ? "No wallet connected. Use Connect in the header."
+    : chainId === HIDEKI_CHAIN_ID
+      ? `Connected · ${shortAddress(address)} · ${networkLabel(chainId)}`
+      : "Your wallet is connected to the wrong network. Switch to Hideki v2 in your wallet.";
 
   return (
     <>
-      <section className="order-1 rounded-2xl border border-line bg-surface p-4">
-        <h2 className="text-base font-semibold">Wallet</h2>
-        <p className="mt-1 text-sm text-muted">Uses the header connection. This card does not request another wallet.</p>
-        {address ? (
-          <p className="mt-3 break-all text-center font-mono text-[11px] text-muted">
-            {address}
-            <br />
-            {networkLabel(chainId)}
-            {chainId === HIDEKI_CHAIN_ID ? " · chain id matches" : " · wrong network"}
-          </p>
-        ) : (
-          <p className="mt-3 text-center text-sm text-muted">No wallet connected. Use Connect in the header.</p>
-        )}
-      </section>
-
-      <section className="order-3 rounded-2xl border border-line bg-surface p-4">
-        <h2 className="text-base font-semibold">Order Details</h2>
-        <p className="mt-1 text-xs text-muted">One minimum BTC-PERP post-only order. The price and size are locked by the protocol quote.</p>
+      <section className="rounded-2xl border border-line bg-surface p-4">
+        <p className="text-xs font-medium text-accent">Step 1</p>
+        <h2 className="mt-1 text-lg font-semibold">Trade BTC on Testnet</h2>
+        <p className="mt-1 text-sm leading-relaxed text-muted">Practice placing a BTC trade using your connected wallet.</p>
+        <p className={"mt-3 text-sm " + (address && chainId !== HIDEKI_CHAIN_ID ? "text-warning" : "text-muted")}>{walletLine}</p>
+        <p className="mt-3 text-sm">
+          Market <span className="font-semibold">BTC-PERP</span>
+        </p>
         <div className="mt-3 grid grid-cols-2 gap-2">
-          <button type="button" onClick={() => chooseSide("buy")} disabled={phase === "signing"} className={sideButton(side === "buy")}>
-            Long
+          <button type="button" onClick={() => chooseSide("buy")} disabled={phase === "signing"} className={sideButton(side === "buy", "buy")}>
+            Buy
           </button>
-          <button type="button" onClick={() => chooseSide("sell")} disabled={phase === "signing"} className={sideButton(false) + (side === "sell" ? " border-danger text-danger" : "")}>
-            Short
+          <button type="button" onClick={() => chooseSide("sell")} disabled={phase === "signing"} className={sideButton(side === "sell", "sell")}>
+            Sell
           </button>
         </div>
-        <label className="mt-3 flex items-center justify-between gap-3 text-sm">
-          <span className="text-muted">Order Type</span>
-          <span className="rounded-lg border border-line bg-raised px-3 py-2 font-mono text-xs">Post Only (Limit)</span>
-        </label>
-        <div className="mt-3 grid gap-2 text-sm">
-          <ReadOnly label="Price" value={quote ? quote.priceDisplay : "Locked after the quote"} unit="" />
-          <ReadOnly label="Minimum size" value={quote ? quote.quantityDisplay : observed?.minimumSize ?? "Protocol minimum"} unit="BTC" />
-        </div>
-        {indexerStale ? (
-          <p className="mt-3 text-sm text-warning">The market-list mark is stale. Review Order reads Hideki v2 directly and does not use that mark.</p>
-        ) : null}
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <div className="rounded-xl border border-line bg-raised px-3 py-2">
-            <p className="text-xs text-muted">Required margin</p>
-            <p className="mt-1 font-mono text-sm">{quote ? quote.imReqDisplay : observed?.requiredMargin ?? "—"}</p>
-          </div>
-          <div className="rounded-xl border border-line bg-raised px-3 py-2">
-            <p className="text-xs text-muted">Min. order size</p>
-            <p className="mt-1 font-mono text-sm">{quote ? quote.quantityDisplay : observed?.minimumSize ?? "—"}</p>
-          </div>
-        </div>
-        {observed && !quote ? <p className="mt-2 text-xs text-muted">Read during the failed check. Not an order, and nothing will be signed.</p> : null}
-      </section>
-
-      <section className="order-4 rounded-2xl border border-line bg-surface p-4">
-        <h2 className="text-base font-semibold">Review and Confirm Order</h2>
-        <p className="mt-1 text-xs text-muted">Read the locked quote, then confirm. The wallet is asked to sign only from the button below.</p>
+        <p className="mt-3 text-sm leading-relaxed text-muted">
+          The app chooses the smallest size the protocol allows, and a limit price that stays off the current market.
+        </p>
+        {unresolved.length > 0 ? <p className="mt-3 text-sm text-warning">{plainTradeCopy(hold ?? "A manual order hash is still unresolved.").plain}</p> : null}
         <button
           type="button"
           onClick={() => void readQuote()}
-          disabled={!address || phase === "reading" || phase === "signing"}
-          className="mt-3 flex h-12 w-full items-center justify-center rounded-xl bg-accent text-sm font-semibold text-ink disabled:opacity-50"
+          disabled={phase === "reading" || phase === "signing"}
+          className="mt-4 flex h-12 w-full items-center justify-center rounded-xl bg-accent text-sm font-semibold text-ink disabled:opacity-50"
         >
-          {phase === "reading" ? "Reading Hideki v2…" : "Review Order →"}
-        </button>
-        <p className="mt-2 text-center text-xs text-muted">You'll confirm the transaction in your wallet.</p>
-        {storageError ? <p className="mt-2 text-sm text-danger">{storageError}</p> : null}
-        {recoveryNote ? <p className="mt-2 text-sm text-muted">{recoveryNote}</p> : null}
-        {hold && !storageError ? <p className="mt-2 text-sm text-warning">{hold}</p> : null}
-        {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
-        {quote && !fresh ? <p className="mt-2 text-sm text-warning">This quote expired. Review the order again before anything can be signed.</p> : null}
-        {quote ? (
-          <div className="mt-3 grid gap-2 text-sm">
-            <Fact label="Market" value={`${quote.symbol}-PERP · ${quote.side} · post-only`} />
-            <Fact label="Chain" value={`${quote.chainId} · ${quote.deploymentId} · net ${quote.netVersion}`} />
-            <Fact label="Book" value={`bid ${quote.bestBidDisplay} · ask ${quote.bestAskDisplay}`} />
-            <Fact label="Notional" value={quote.notionalDisplay} />
-            <Fact label="Maker fee" value={`${quote.makerFeeDisplay} · rate ${quote.makerFeeRate}`} />
-            <Fact label="Taker fee" value={quote.takerFeeNote} />
-            <Fact label="Initial / maintenance" value={`${quote.initialMarginBps} / ${quote.maintenanceMarginBps} bps`} />
-            <Fact label="Unlocked collateral" value={quote.unlockedCollateralDisplay} />
-            <Fact label="Equity / margin" value={`${quote.marginStatus} · equity ${quote.equityDisplay} · IM ${quote.imReqDisplay} · MM ${quote.mmReqDisplay}`} />
-            <Fact label="Size limit" value={`${quote.limitedBy} · max ${quote.maxQuantityDisplay}`} />
-            <Fact label="Position" value={quote.positionDisplay} />
-            <Fact label="If later filled" value={quote.filledExposureDisplay} />
-            <Fact label="Quote block" value={quote.block} />
-          </div>
-        ) : null}
-        {quote ? (
-          <ul className="mt-3 list-disc pl-5 text-xs text-muted">
-            {quote.warnings.map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-          </ul>
-        ) : null}
-        <label className="mt-3 flex items-start gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={confirmed}
-            onChange={(event) => setConfirmed(event.target.checked)}
-            disabled={!quote || phase === "signing"}
-            className="mt-1"
-          />
-          I confirm this single minimum post-only order. It will not be repeated automatically.
-        </label>
-        <button
-          type="button"
-          onClick={() => void sign()}
-          disabled={!quote || !confirmed || !fresh || Boolean(hold) || recovering || phase === "signing" || result?.outcome === "submitted" || result?.outcome === "unknown"}
-          className="mt-3 h-12 w-full rounded-xl border border-accent text-sm font-semibold text-accent disabled:opacity-40"
-        >
-          Sign post-only order in wallet
+          {phase === "reading" ? "Checking the market…" : "Preview Trade"}
         </button>
       </section>
 
-      <section className="order-5 rounded-2xl border border-line bg-surface p-4">
-        <h2 className="text-base font-semibold">Transaction Status</h2>
-        {recovering ? <p className="mt-2 text-sm text-muted">Checking saved orders…</p> : null}
-        {result ? (
-          <div className="mt-3 grid gap-2 text-sm">
-            <Fact label="Transaction hash" value={result.hash ?? "none"} />
-            <Fact label="Receipt status" value={result.receiptStatus} />
-            <Fact label="Resting order" value={result.resting} />
-            <p className="text-muted">{result.detail}</p>
-          </div>
-        ) : (
-          <p className="mt-2 text-sm text-muted">No transaction yet. The hash, receipt, and resting order are shown separately after a signature.</p>
-        )}
-        {unresolved.length > 0 ? (
-          <div className="mt-3 grid gap-2 text-sm">
-            {unresolved.map((row) => (
-              <div key={row.intentId} className="rounded-xl border border-line px-3 py-2">
-                <p className="break-all font-mono text-xs">
-                  {row.phase} · {row.side} · {row.hash ?? "no hash yet"}
-                </p>
-                <p className="text-muted">Stored in this browser. Acknowledging it does not allow another send.</p>
-                {row.phase === "unknown" ? (
-                  <button type="button" onClick={() => void acknowledge(row.intentId)} className="mt-2 h-11 rounded-xl border border-line px-3 text-sm">
-                    {row.acknowledged ? "Still locked" : "I have seen this unresolved hash"}
-                  </button>
-                ) : null}
-              </div>
-            ))}
-            <button type="button" onClick={() => void recheck()} className="h-11 rounded-xl border border-line px-3 text-sm">
-              Check Hideki v2 again
+      {showReview ? (
+        <section className="rounded-2xl border border-line bg-surface p-4">
+          <p className="text-xs font-medium text-accent">Step 2</p>
+          <h2 className="mt-1 text-base font-semibold">Review your trade</h2>
+          {phase === "reading" ? <p className="mt-3 text-sm text-muted">Getting a fresh price from Hideki v2…</p> : null}
+          {copy ? <p className={"mt-3 text-sm " + (quote && fresh && !hold ? "text-muted" : "text-warning")}>{copy.plain}</p> : null}
+          {quote ? (
+            <dl className="mt-3 grid gap-2 text-sm">
+              <Row label="Direction" value={quote.side === "buy" ? "Buy" : "Sell"} />
+              <Row label="Price" value={shownValue(quote.priceDisplay)} />
+              <Row label="Size" value={`${shownValue(quote.quantityDisplay)} BTC`} />
+              <Row label="Required margin" value={shownValue(quote.imReqDisplay)} />
+              <Row label="Status" value={fresh && !hold ? "Ready to confirm" : "Not ready"} />
+            </dl>
+          ) : observed ? (
+            <dl className="mt-3 grid gap-2 text-sm">
+              <Row label="Direction" value={side === "buy" ? "Buy" : "Sell"} />
+              <Row label="Price" value={shownValue(observed.limitPrice)} />
+              <Row label="Size" value={shownValue(observed.minimumSize) === "Unavailable" ? "Unavailable" : `${shownValue(observed.minimumSize)} BTC`} />
+              <Row label="Required margin" value={shownValue(observed.requiredMargin)} />
+              <Row label="Status" value="Not ready" />
+            </dl>
+          ) : null}
+          <p className="mt-3 text-sm leading-relaxed text-muted">This is a limit order. It can stay open and unfilled until someone trades against it.</p>
+          {copy?.retry && phase !== "reading" && phase !== "signing" ? (
+            <button type="button" onClick={() => void readQuote()} className="mt-3 h-11 w-full rounded-xl border border-line text-sm font-medium">
+              Retry Preview
             </button>
-          </div>
-        ) : null}
-        {unknownNote ? <p className="mt-2 text-sm text-muted">{unknownNote}</p> : null}
-      </section>
+          ) : null}
+          {phase !== "signing" ? (
+            <button type="button" onClick={clearPreview} className="mt-2 h-11 w-full rounded-xl border border-line text-sm font-medium">
+              Back
+            </button>
+          ) : null}
+          <details className="mt-3 rounded-xl border border-line px-3 py-2">
+            <summary className="cursor-pointer text-sm font-medium">Advanced Details</summary>
+            <div className="mt-2 grid gap-2 text-xs text-muted">
+              <p>On-chain mark: {shownValue(quote?.markDisplay ?? observed?.mark)}</p>
+              <p>Best bid: {shownValue(quote?.bestBidDisplay ?? observed?.bestBid)} · Best ask: {shownValue(quote?.bestAskDisplay ?? observed?.bestAsk)}</p>
+              <p>Indexer mark: {indexerMark ? `${indexerMark}${indexerAge ? ` · ${indexerAge}` : ""}` : "Unavailable"}{indexerStale ? " · stale, not used as the order price" : ""}</p>
+              {indexerError ? <p>Indexer: {indexerError}</p> : null}
+              <p>Network: {quote ? `${quote.chainId} · ${quote.deploymentId} · net ${quote.netVersion}` : networkLabel(chainId)}</p>
+              <p>Quote time: {quote ? new Date(quote.quotedAt).toISOString() : "Unavailable"}</p>
+              {quote ? <p>Margin: {quote.marginStatus} · equity {quote.equityDisplay} · required {quote.imReqDisplay} · maintenance {quote.mmReqDisplay}</p> : null}
+              {error ? <p>Technical check: {error}</p> : null}
+              {hold ? <p>Submission lock: {hold}</p> : null}
+              {storageError ? <p>{storageError}</p> : null}
+              {recoveryNote ? <p>{recoveryNote}</p> : null}
+              {result ? <p>Technical result: {result.detail}</p> : null}
+              {quote
+                ? quote.warnings.map((warning) => (
+                    <p key={warning}>{warning}</p>
+                  ))
+                : null}
+            </div>
+          </details>
+        </section>
+      ) : null}
+
+      {quote || result || phase === "signing" ? (
+        <section className="rounded-2xl border border-line bg-surface p-4">
+          <p className="text-xs font-medium text-accent">Step 3</p>
+          <h2 className="mt-1 text-base font-semibold">Confirm your trade</h2>
+          <p className="mt-1 text-sm text-muted">Your wallet is asked to sign only when you press this button.</p>
+          <button
+            type="button"
+            onClick={() => void sign()}
+            disabled={!allowed}
+            className="mt-3 h-12 w-full rounded-xl bg-accent text-sm font-semibold text-ink disabled:opacity-40"
+          >
+            {phase === "signing" ? "Waiting for your wallet…" : "Confirm Testnet Trade"}
+          </button>
+          {result ? (
+            <div className="mt-3 grid gap-2 text-sm">
+              <Row label="Transaction" value={tradeResultCopy(result).transaction} />
+              <Row label="Order" value={tradeResultCopy(result).order} />
+              <p className="text-muted">{tradeResultCopy(result).note}</p>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-muted">No transaction yet.</p>
+          )}
+          {unresolved.length > 0 ? (
+            <div className="mt-3 grid gap-2">
+              {unresolved.map((row) => (
+                <div key={row.intentId} className="rounded-xl border border-line px-3 py-2 text-sm">
+                  <p>{row.phase === "unknown" ? "Status unknown" : "Waiting for the wallet"} · {row.side === "buy" ? "Buy" : "Sell"}</p>
+                  <p className="mt-1 break-all font-mono text-[11px] text-muted">{row.hash ?? "No transaction hash yet"}</p>
+                  {row.phase === "unknown" ? (
+                    <button type="button" onClick={() => void acknowledge(row.intentId)} className="mt-2 h-11 rounded-xl border border-line px-3 text-sm">
+                      {row.acknowledged ? "Still locked" : "I have seen this unresolved trade"}
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+              <button type="button" onClick={() => void recheck()} className="h-11 rounded-xl border border-line px-3 text-sm">
+                Check the status again
+              </button>
+            </div>
+          ) : null}
+          {unknownNote ? <p className="mt-2 text-sm text-muted">{unknownNote}</p> : null}
+        </section>
+      ) : null}
     </>
   );
 }
@@ -333,30 +347,20 @@ function readStoredLedger(): { ok: true; ledger: ManualLedger } | { ok: false; e
   }
 }
 
-function ReadOnly({ label, value, unit }: { label: string; value: string; unit: string }) {
+function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-raised px-3 py-2">
-      <span className="text-muted">{label}</span>
-      <span className="truncate font-mono text-xs">
-        {value} <span className="text-muted">{unit}</span>
-      </span>
+      <dt className="text-muted">{label}</dt>
+      <dd className="font-mono text-xs">{value}</dd>
     </div>
   );
 }
 
-function sideButton(active: boolean): string {
-  return active
-    ? "h-11 rounded-xl border border-healthy bg-healthy/15 font-semibold text-healthy"
-    : "h-11 rounded-xl border border-line bg-raised font-medium text-muted";
-}
-
-function Fact({ label, value }: { label: string; value: string }) {
-  return (
-    <p className="rounded-lg border border-line px-3 py-2">
-      <span className="block text-xs text-muted">{label}</span>
-      <span className="font-mono text-xs break-all">{value}</span>
-    </p>
-  );
+function sideButton(active: boolean, side: "buy" | "sell"): string {
+  if (!active) return "h-12 rounded-xl border border-line bg-raised font-medium text-muted";
+  return side === "buy"
+    ? "h-12 rounded-xl border border-accent bg-accent/15 font-semibold text-fg"
+    : "h-12 rounded-xl border border-danger bg-danger/10 font-semibold text-danger";
 }
 
 function provider(): Eip1193 | null {
