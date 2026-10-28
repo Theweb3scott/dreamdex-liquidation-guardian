@@ -1,24 +1,28 @@
 import { useEffect, useState } from "react";
 import Wallet from "lucide-react/dist/esm/icons/wallet";
-import { allowWalletMethod } from "@/lib/guardian/review";
-import { MANUAL_LEDGER_KEY, parseLedger, quoteFresh, submissionBlock, type ManualLedger, type ManualQuote } from "@/lib/guardian/manual-order";
+import { HIDEKI_CHAIN_ID, allowWalletMethod } from "@/lib/guardian/review";
+import { MANUAL_LEDGER_KEY, parseLedger, quoteFresh, reviewPreconditions, submissionBlock, type ManualLedger, type ManualQuote, type OrderObservation } from "@/lib/guardian/manual-order";
 import type { ManualSubmit } from "@/lib/guardian/manual-order-client";
 
 type Eip1193 = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+  on?: (event: string, handler: (...args: unknown[]) => void) => void;
+  removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
 };
 
 type Phase = "idle" | "reading" | "ready" | "signing" | "done";
 
 const HIDEKI_HEX = "0xc4cf";
 
-export function ManualTestOrder() {
+export function ManualTestOrder({ symbol = "BTC", indexerStale = false }: { symbol?: string; indexerStale?: boolean }) {
   const [address, setAddress] = useState<string | null>(null);
+  const [chainId, setChainId] = useState<number | null>(null);
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const [quote, setQuote] = useState<ManualQuote | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [observed, setObserved] = useState<OrderObservation | null>(null);
   const [result, setResult] = useState<ManualSubmit | null>(null);
   const [unknownNote, setUnknownNote] = useState<string | null>(null);
   const [ledger, setLedger] = useState<ManualLedger>({ version: 1, intents: [] });
@@ -57,6 +61,35 @@ export function ManualTestOrder() {
   }, []);
 
   useEffect(() => {
+    const eth = provider();
+    if (!eth?.on) return;
+    const onChain = (...args: unknown[]) => {
+      const hex = typeof args[0] === "string" ? args[0] : "0x0";
+      const parsed = Number.parseInt(hex, 16);
+      setChainId(Number.isFinite(parsed) ? parsed : null);
+      setQuote(null);
+      setObserved(null);
+      setConfirmed(false);
+      setPhase("idle");
+    };
+    const onAccounts = (...args: unknown[]) => {
+      const accounts = Array.isArray(args[0]) ? args[0].filter((item): item is string => typeof item === "string") : [];
+      setAddress(accounts[0] ?? null);
+      if (accounts.length === 0) setChainId(null);
+      setQuote(null);
+      setObserved(null);
+      setConfirmed(false);
+      setPhase("idle");
+    };
+    eth.on("chainChanged", onChain);
+    eth.on("accountsChanged", onAccounts);
+    return () => {
+      eth.removeListener?.("chainChanged", onChain);
+      eth.removeListener?.("accountsChanged", onAccounts);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!quote || phase === "signing") return;
     const id = setInterval(() => setClock((tick) => tick + 1), 1_000);
     return () => clearInterval(id);
@@ -66,6 +99,7 @@ export function ManualTestOrder() {
     if (phase === "signing") return;
     setSide(next);
     setQuote(null);
+    setObserved(null);
     setConfirmed(false);
     setResult(null);
     setError(null);
@@ -100,8 +134,13 @@ export function ManualTestOrder() {
       const accounts = await eth.request({ method: "eth_requestAccounts" });
       const first = Array.isArray(accounts) ? accounts.find((item) => typeof item === "string") : null;
       if (typeof first !== "string") throw new Error("The wallet did not return an account.");
+      allowWalletMethod("eth_chainId");
+      const hex = await eth.request({ method: "eth_chainId" });
+      const parsed = typeof hex === "string" ? Number.parseInt(hex, 16) : Number.NaN;
+      setChainId(Number.isFinite(parsed) ? parsed : null);
       setAddress(first);
       setQuote(null);
+      setObserved(null);
       setConfirmed(false);
       setResult(null);
     } catch (caught) {
@@ -110,24 +149,34 @@ export function ManualTestOrder() {
   }
 
   async function readQuote() {
-    if (!address) return;
+    const blocked = reviewPreconditions({ account: address, chainId, symbol });
+    if (blocked) {
+      setQuote(null);
+      setObserved(null);
+      setError(blocked);
+      setPhase("idle");
+      return;
+    }
     setPhase("reading");
     setError(null);
     setResult(null);
     setConfirmed(false);
     try {
       const { prepareManualQuote } = await import("@/lib/guardian/manual-order-client");
-      const read = await prepareManualQuote(address, side);
+      const read = await prepareManualQuote(address as string, side);
       if (!read.ok) {
         setQuote(null);
+        setObserved(read.observed ?? null);
         setError(read.error);
         setPhase("idle");
         return;
       }
+      setObserved(null);
       setQuote(read.quote);
       setPhase("ready");
     } catch (caught) {
       setQuote(null);
+      setObserved(null);
       setError(caught instanceof Error ? caught.message : "The quote could not be read.");
       setPhase("idle");
     }
@@ -197,7 +246,16 @@ export function ManualTestOrder() {
           {address ? "Wallet connected" : "Connect Wallet"}
         </button>
         <p className="mt-2 text-center text-xs text-muted">Make sure you're on Somnia Testnet (Chain 50383).</p>
-        {address ? <p className="mt-2 break-all text-center font-mono text-[11px] text-muted">{address}</p> : null}
+        {address ? (
+          <p className="mt-2 break-all text-center font-mono text-[11px] text-muted">
+            {address}
+            <br />
+            chain {chainId ?? "not read"}
+            {chainId === HIDEKI_CHAIN_ID ? " · Hideki v2 chain id matches" : " · wrong network"}
+          </p>
+        ) : (
+          <p className="mt-2 text-center text-xs text-muted">No wallet connected.</p>
+        )}
       </section>
 
       <section className="order-3 rounded-2xl border border-line bg-surface p-4">
@@ -217,18 +275,22 @@ export function ManualTestOrder() {
         </label>
         <div className="mt-3 grid gap-2 text-sm">
           <ReadOnly label="Price" value={quote ? quote.priceDisplay : "Locked after the quote"} unit="" />
-          <ReadOnly label="Minimum size" value={quote ? quote.quantityDisplay : "Protocol minimum"} unit="BTC" />
+          <ReadOnly label="Minimum size" value={quote ? quote.quantityDisplay : observed?.minimumSize ?? "Protocol minimum"} unit="BTC" />
         </div>
+        {indexerStale ? (
+          <p className="mt-3 text-sm text-warning">The market-list mark is stale. Review Order reads Hideki v2 directly and does not use that mark.</p>
+        ) : null}
         <div className="mt-3 grid grid-cols-2 gap-2">
           <div className="rounded-xl border border-line bg-raised px-3 py-2">
             <p className="text-xs text-muted">Required margin</p>
-            <p className="mt-1 font-mono text-sm">{quote ? quote.imReqDisplay : "—"}</p>
+            <p className="mt-1 font-mono text-sm">{quote ? quote.imReqDisplay : observed?.requiredMargin ?? "—"}</p>
           </div>
           <div className="rounded-xl border border-line bg-raised px-3 py-2">
             <p className="text-xs text-muted">Min. order size</p>
-            <p className="mt-1 font-mono text-sm">{quote ? quote.quantityDisplay : "—"}</p>
+            <p className="mt-1 font-mono text-sm">{quote ? quote.quantityDisplay : observed?.minimumSize ?? "—"}</p>
           </div>
         </div>
+        {observed && !quote ? <p className="mt-2 text-xs text-muted">Read during the failed check. Not an order, and nothing will be signed.</p> : null}
       </section>
 
       <section className="order-4 rounded-2xl border border-line bg-surface p-4">
@@ -240,13 +302,14 @@ export function ManualTestOrder() {
           disabled={!address || phase === "reading" || phase === "signing"}
           className="mt-3 flex h-12 w-full items-center justify-center rounded-xl bg-accent text-sm font-semibold text-ink disabled:opacity-50"
         >
-          {phase === "reading" ? "Reading…" : "Review Order →"}
+          {phase === "reading" ? "Reading Hideki v2…" : "Review Order →"}
         </button>
         <p className="mt-2 text-center text-xs text-muted">You'll confirm the transaction in your wallet.</p>
         {storageError ? <p className="mt-2 text-sm text-danger">{storageError}</p> : null}
         {recoveryNote ? <p className="mt-2 text-sm text-muted">{recoveryNote}</p> : null}
         {hold && !storageError ? <p className="mt-2 text-sm text-warning">{hold}</p> : null}
         {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
+        {quote && !fresh ? <p className="mt-2 text-sm text-warning">This quote expired. Review the order again before anything can be signed.</p> : null}
         {quote ? (
           <div className="mt-3 grid gap-2 text-sm">
             <Fact label="Market" value={`${quote.symbol}-PERP · ${quote.side} · post-only`} />

@@ -207,7 +207,7 @@ export function WalletReview() {
     <section className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
       <div>
         <h2 className="text-base font-semibold">Execution review</h2>
-        <p className="mt-1 text-xs text-muted">Browser wallet. This review cannot send. Chain 50383 is checked against Hideki v2.</p>
+        <p className="mt-1 text-xs text-muted">This protective review cannot send a transaction. It does not use the testnet order connection. Chain 50383 is checked against Hideki v2 only after this card connects its own wallet.</p>
       </div>
       <div className="flex flex-col gap-2">
         <button type="button" onClick={() => void connect()} className="h-12 rounded-xl bg-accent text-sm font-semibold text-ink">

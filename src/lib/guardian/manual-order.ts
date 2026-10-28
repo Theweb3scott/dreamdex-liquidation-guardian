@@ -132,39 +132,87 @@ export function alignedMinimum(minQuantity: bigint, lotSize: bigint): bigint | n
   return quantity;
 }
 
-export function assessManualOrder(facts: ManualFacts): { ok: true; quote: ManualQuote } | { ok: false; error: string } {
-  if (facts.symbol !== MANUAL_MARKET) return { ok: false, error: "Only BTC-PERP can be used for this manual order." };
-  if (!/^0x[0-9a-fA-F]{40}$/.test(facts.wallet)) return { ok: false, error: "The wallet address is not a 20-byte account." };
+export type OrderObservation = {
+  minimumSize: string;
+  requiredMargin: string;
+  bestBid: string;
+  bestAsk: string;
+  mark: string;
+  limitPrice: string;
+};
+
+export function observeOrder(facts: ManualFacts, limit: bigint | null): OrderObservation {
+  const quantity = alignedMinimum(facts.minQuantity, facts.lotSize);
+  return {
+    minimumSize: quantity == null ? "missing" : formatRaw(quantity, facts.baseDecimals),
+    requiredMargin: formatRaw(facts.imReq, facts.quoteDecimals),
+    bestBid: !facts.bookKnown || facts.bestBid == null ? "missing" : formatRaw(facts.bestBid, facts.quoteDecimals),
+    bestAsk: !facts.bookKnown || facts.bestAsk == null ? "missing" : formatRaw(facts.bestAsk, facts.quoteDecimals),
+    mark: facts.markPrice > 0n ? formatRaw(facts.markPrice, facts.quoteDecimals) : "missing",
+    limitPrice: limit == null ? "missing" : formatRaw(limit, facts.quoteDecimals),
+  };
+}
+
+export function reviewPreconditions(input: { account: string | null; chainId: number | null; symbol: string }): string | null {
+  if (!input.account) return "Connect a wallet on chain 50383 before reviewing an order. Nothing will be signed.";
+  if (input.chainId !== HIDEKI_CHAIN_ID) {
+    return `Wrong network. The wallet is on chain ${input.chainId ?? "unknown"}, not 50383. Nothing will be signed.`;
+  }
+  if (input.symbol !== MANUAL_MARKET) {
+    return `${input.symbol || "This market"}-PERP cannot be ordered. Only BTC-PERP is supported. Nothing will be signed.`;
+  }
+  return null;
+}
+
+export function explainRpcFailure(message: string): string {
+  const text = message.trim() || "The request failed.";
+  const rpc = /fetch|network|timeout|timed out|econn|rpc|socket|aborted|failed to/i.test(text);
+  const body = rpc ? `Hideki v2 RPC failed. Nothing will be signed. ${text}` : text;
+  return body.slice(0, 500);
+}
+
+/** The book is usable only when it was read and the quote is still inside the signing window. */
+export function orderBookState(bookKnown: boolean, readAt: number, now: number): "missing" | "stale" | "fresh" {
+  if (!bookKnown) return "missing";
+  if (now < readAt || now - readAt > QUOTE_TTL_MS) return "stale";
+  return "fresh";
+}
+
+export function assessManualOrder(facts: ManualFacts): { ok: true; quote: ManualQuote } | { ok: false; error: string; observed: OrderObservation } {
+  const refuse = (error: string, limit: bigint | null = null) => ({ ok: false as const, error, observed: observeOrder(facts, limit) });
+  if (facts.symbol !== MANUAL_MARKET) return refuse("Only BTC-PERP can be used for this manual order.");
+  if (!/^0x[0-9a-fA-F]{40}$/.test(facts.wallet)) return refuse("The wallet address is not a 20-byte account.");
   const deployment = assessDeployment(facts.deployment);
-  if (!deployment.ok) return { ok: false, error: deployment.reason };
-  if (facts.deployment.chainId !== HIDEKI_CHAIN_ID) return { ok: false, error: "Hideki v2 RPC did not report chain 50383." };
-  if (facts.deployment.netVersion !== HIDEKI_V2_NET_VERSION) return { ok: false, error: "Network version is not Hideki v2." };
-  if (facts.deployment.rpcHost !== HIDEKI_V2_RPC_HOST) return { ok: false, error: "Quote RPC is not the Hideki v2 endpoint." };
-  if (!facts.priceable || facts.markPrice <= 0n) return { ok: false, error: "BTC-PERP has no usable mark. Nothing will be signed." };
-  if (facts.oneBase <= 0n) return { ok: false, error: "The market base unit is missing." };
+  if (!deployment.ok) return refuse(deployment.reason);
+  if (facts.deployment.chainId !== HIDEKI_CHAIN_ID) return refuse("Hideki v2 RPC did not report chain 50383.");
+  if (facts.deployment.netVersion !== HIDEKI_V2_NET_VERSION) return refuse("Network version is not Hideki v2.");
+  if (facts.deployment.rpcHost !== HIDEKI_V2_RPC_HOST) return refuse("Quote RPC is not the Hideki v2 endpoint.");
+  if (!facts.priceable || facts.markPrice <= 0n) return refuse("BTC-PERP has no usable mark. Nothing will be signed.");
+  if (facts.oneBase <= 0n) return refuse("The market base unit is missing.");
   if (!facts.collateralToken || facts.collateralToken === "0x0000000000000000000000000000000000000000") {
-    return { ok: false, error: "The margin bank did not report a collateral token." };
+    return refuse("The margin bank did not report a collateral token.");
   }
   const price = postOnlyPrice(facts.markPrice, facts.tickSize, facts.isBid);
-  if (price == null) return { ok: false, error: "No post-only price can sit off the mark on this tick grid." };
+  if (price == null) return refuse("No post-only price can sit off the mark on this tick grid.");
   if (facts.isBid ? price >= facts.markPrice : price <= facts.markPrice) {
-    return { ok: false, error: "The post-only price would touch or cross the mark." };
+    return refuse("The post-only price would touch or cross the mark.", price);
   }
   if (!facts.bookKnown) {
-    return { ok: false, error: "The order book could not be read, so a crossing post-only price cannot be ruled out. Nothing will be signed." };
+    return refuse("The order book could not be read, so a crossing post-only price cannot be ruled out. Nothing will be signed.", price);
   }
   if (postOnlyCrosses(price, facts.isBid, facts.bestBid, facts.bestAsk)) {
-    return {
-      ok: false,
-      error: facts.isBid
-        ? "This post-only buy would cross the best ask. Nothing will be signed."
-        : "This post-only sell would cross the best bid. Nothing will be signed.",
-    };
+    const seen = observeOrder(facts, price);
+    return refuse(
+      facts.isBid
+        ? `This post-only buy at ${seen.limitPrice} would cross the best ask ${seen.bestAsk}. Mark ${seen.mark}. Nothing will be signed.`
+        : `This post-only sell at ${seen.limitPrice} would cross the best bid ${seen.bestBid}. Mark ${seen.mark}. Nothing will be signed.`,
+      price,
+    );
   }
   const quantity = alignedMinimum(facts.minQuantity, facts.lotSize);
-  if (quantity == null) return { ok: false, error: "BTC-PERP has no valid minimum quantity." };
+  if (quantity == null) return refuse("BTC-PERP has no valid minimum quantity.", price);
   if (!facts.placeable || facts.maxQuantity < quantity) {
-    return { ok: false, error: `The minimum order is larger than the account can place (${facts.limitedBy}).` };
+    return refuse(`The minimum order is larger than the account can place (${facts.limitedBy}).`, price);
   }
   const notional = (price * quantity) / facts.oneBase;
   const makerFee = (notional * facts.makerFeeBpsTimes1k) / FEE_SCALE;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
-import { HIDEKI_CHAIN_ID, HIDEKI_V2_NET_VERSION, HIDEKI_V2_RPC_HOST, SUBMISSION_ENABLED } from "./review.ts";
+import { HIDEKI_CHAIN_ID, HIDEKI_V2_NET_VERSION, HIDEKI_V2_RPC_HOST, QUOTE_TTL_MS, SUBMISSION_ENABLED } from "./review.ts";
 import {
   MANUAL_AUTOMATIC,
   POST_ONLY,
@@ -12,10 +12,13 @@ import {
   attachHash,
   classifyReceipt,
   emptyLedger,
+  explainRpcFailure,
+  orderBookState,
   parseLedger,
   postOnlyCrosses,
   postOnlyPrice,
   quoteFresh,
+  reviewPreconditions,
   reduceFlight,
   releaseUnsent,
   rememberIntent,
@@ -272,5 +275,66 @@ describe("manual post-only order", () => {
     assert.match(walletIdentityReady({ ...ready, poolCodeBytes: 0 }, WALLET) ?? "", /no code/);
     assert.match(walletIdentityReady({ ...ready, poolCodeBytes: null }, WALLET) ?? "", /could not read/);
     assert.match(walletIdentityReady({ ...ready, account: "0x0000000000000000000000000000000000000001" }, WALLET) ?? "", /does not match/);
+  });
+
+  it("refuses the wrong network, a disconnected wallet, and an unsupported market", () => {
+    assert.match(reviewPreconditions({ account: null, chainId: 50383, symbol: "BTC" }) ?? "", /Connect a wallet/);
+    assert.match(reviewPreconditions({ account: WALLET, chainId: 1, symbol: "BTC" }) ?? "", /Wrong network/);
+    assert.match(reviewPreconditions({ account: WALLET, chainId: null, symbol: "BTC" }) ?? "", /unknown/);
+    assert.match(reviewPreconditions({ account: WALLET, chainId: 50383, symbol: "ETH" }) ?? "", /cannot be ordered/);
+    assert.equal(reviewPreconditions({ account: WALLET, chainId: 50383, symbol: "BTC" }), null);
+  });
+
+  it("refuses missing market metadata without inventing a size", () => {
+    const missingTick = assessManualOrder(facts({ tickSize: 0n }));
+    assert.equal(missingTick.ok, false);
+    if (missingTick.ok) return;
+    assert.match(missingTick.error, /tick/);
+    assert.equal(missingTick.observed.limitPrice, "missing");
+    const missingSize = assessManualOrder(facts({ minQuantity: 0n }));
+    assert.equal(missingSize.ok, false);
+    if (missingSize.ok) return;
+    assert.match(missingSize.error, /minimum/);
+    assert.equal(missingSize.observed.minimumSize, "missing");
+  });
+
+  it("rejects a missing or stale order book and still prices a fresh non-crossing book", () => {
+    assert.equal(orderBookState(false, 1_000, 1_000), "missing");
+    assert.equal(orderBookState(true, 1_000, 1_000 + QUOTE_TTL_MS + 1), "stale");
+    assert.equal(orderBookState(true, 1_000, 1_000 + QUOTE_TTL_MS), "fresh");
+    const missing = assessManualOrder(facts({ bookKnown: false, bestBid: null, bestAsk: null }));
+    assert.equal(missing.ok, false);
+    if (missing.ok) return;
+    assert.match(missing.error, /order book/);
+    assert.equal(missing.observed.bestBid, "missing");
+    const mark = facts().markPrice;
+    const tick = facts().tickSize;
+    const sell = postOnlyPrice(mark, tick, false);
+    if (sell == null) {
+      assert.fail("sell price");
+      return;
+    }
+    const crossed = assessManualOrder(facts({ isBid: false, bestBid: sell, bestAsk: sell + tick }));
+    assert.equal(crossed.ok, false);
+    if (crossed.ok) return;
+    assert.match(crossed.error, /post-only sell/);
+    assert.match(crossed.error, /Nothing will be signed/);
+    assert.notEqual(crossed.observed.requiredMargin, "missing");
+    const valid = assessManualOrder(facts({ isBid: false, bestBid: sell - tick, bestAsk: sell + tick }));
+    assert.equal(valid.ok, true);
+    if (!valid.ok) return;
+    assert.ok(BigInt(valid.quote.price) > sell - tick);
+    assert.equal(postOnlyCrosses(BigInt(valid.quote.price), false, sell - tick, sell + tick), false);
+  });
+
+  it("expires a quote and names a failed RPC without signing", () => {
+    const built = assessManualOrder(facts());
+    assert.equal(built.ok, true);
+    if (!built.ok) return;
+    assert.equal(quoteFresh(built.quote, built.quote.quotedAt + QUOTE_TTL_MS), true);
+    assert.equal(quoteFresh(built.quote, built.quote.quotedAt + QUOTE_TTL_MS + 1), false);
+    assert.match(explainRpcFailure("fetch failed"), /Hideki v2 RPC failed/);
+    assert.match(explainRpcFailure("socket hang up"), /Nothing will be signed/);
+    assert.doesNotMatch(explainRpcFailure("BTC-PERP is not listed"), /RPC failed/);
   });
 });

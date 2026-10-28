@@ -18,6 +18,7 @@ import {
   parseLedger,
   postOnlyPrice,
   quoteFresh,
+  explainRpcFailure,
   releaseUnsent,
   rememberIntent,
   restingStatus,
@@ -28,6 +29,7 @@ import {
   type ManualLedger,
   type ManualQuote,
   type ManualSide,
+  type OrderObservation,
   type ReconcileView,
   type RestingOrder,
   type StoredIntent,
@@ -40,7 +42,7 @@ type Eip1193 = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
 };
 
-export type ManualRead = { ok: true; quote: ManualQuote } | { ok: false; error: string };
+export type ManualRead = { ok: true; quote: ManualQuote } | { ok: false; error: string; observed?: OrderObservation | null };
 
 export type ManualSubmit = {
   receiptStatus: "success" | "reverted" | "unknown" | "none";
@@ -142,14 +144,14 @@ export async function prepareManualQuote(rawAccount: string, side: ManualSide): 
         poolMarginBank: getAddress(poolBank),
       },
     });
-    if (!built.ok) return built;
+    if (!built.ok) return { ok: false, error: built.error, observed: built.observed };
     if (built.quote.deploymentId !== HIDEKI_V2_ID || built.quote.orderType !== POST_ONLY) {
       return { ok: false, error: "The quote is not a Hideki v2 post-only order." };
     }
     return built;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { ok: false, error: message.slice(0, 500) };
+    return { ok: false, error: explainRpcFailure(message) };
   } finally {
     await closeMarkets(markets);
   }
