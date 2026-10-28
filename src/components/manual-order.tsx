@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
-import Wallet from "lucide-react/dist/esm/icons/wallet";
-import { HIDEKI_CHAIN_ID, allowWalletMethod } from "@/lib/guardian/review";
+import { useEffect, useRef, useState } from "react";
+import { HIDEKI_CHAIN_ID } from "@/lib/guardian/review";
+import { useAppWallet } from "@/components/app-wallet";
+import { networkLabel, tradingSessionKey } from "@/lib/guardian/app-wallet";
 import { MANUAL_LEDGER_KEY, parseLedger, quoteFresh, reviewPreconditions, submissionBlock, type ManualLedger, type ManualQuote, type OrderObservation } from "@/lib/guardian/manual-order";
 import type { ManualSubmit } from "@/lib/guardian/manual-order-client";
 
@@ -12,11 +13,10 @@ type Eip1193 = {
 
 type Phase = "idle" | "reading" | "ready" | "signing" | "done";
 
-const HIDEKI_HEX = "0xc4cf";
-
 export function ManualTestOrder({ symbol = "BTC", indexerStale = false }: { symbol?: string; indexerStale?: boolean }) {
-  const [address, setAddress] = useState<string | null>(null);
-  const [chainId, setChainId] = useState<number | null>(null);
+  const shared = useAppWallet();
+  const address = shared.wallet.address;
+  const chainId = shared.wallet.chainId;
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const [quote, setQuote] = useState<ManualQuote | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -60,34 +60,16 @@ export function ManualTestOrder({ symbol = "BTC", indexerStale = false }: { symb
     };
   }, []);
 
+  const sessionKey = tradingSessionKey(address, chainId);
+  const seenSession = useRef(sessionKey);
   useEffect(() => {
-    const eth = provider();
-    if (!eth?.on) return;
-    const onChain = (...args: unknown[]) => {
-      const hex = typeof args[0] === "string" ? args[0] : "0x0";
-      const parsed = Number.parseInt(hex, 16);
-      setChainId(Number.isFinite(parsed) ? parsed : null);
-      setQuote(null);
-      setObserved(null);
-      setConfirmed(false);
-      setPhase("idle");
-    };
-    const onAccounts = (...args: unknown[]) => {
-      const accounts = Array.isArray(args[0]) ? args[0].filter((item): item is string => typeof item === "string") : [];
-      setAddress(accounts[0] ?? null);
-      if (accounts.length === 0) setChainId(null);
-      setQuote(null);
-      setObserved(null);
-      setConfirmed(false);
-      setPhase("idle");
-    };
-    eth.on("chainChanged", onChain);
-    eth.on("accountsChanged", onAccounts);
-    return () => {
-      eth.removeListener?.("chainChanged", onChain);
-      eth.removeListener?.("accountsChanged", onAccounts);
-    };
-  }, []);
+    if (seenSession.current === sessionKey) return;
+    seenSession.current = sessionKey;
+    setQuote(null);
+    setObserved(null);
+    setConfirmed(false);
+    setPhase((current) => (current === "signing" ? current : "idle"));
+  }, [sessionKey]);
 
   useEffect(() => {
     if (!quote || phase === "signing") return;
@@ -104,48 +86,6 @@ export function ManualTestOrder({ symbol = "BTC", indexerStale = false }: { symb
     setResult(null);
     setError(null);
     setPhase("idle");
-  }
-
-  async function connect() {
-    setError(null);
-    try {
-      const eth = provider();
-      if (!eth) throw new Error("No browser wallet is available.");
-      allowWalletMethod("wallet_switchEthereumChain");
-      try {
-        await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: HIDEKI_HEX }] });
-      } catch (switchError) {
-        const code = typeof switchError === "object" && switchError && "code" in switchError ? switchError.code : 0;
-        if (code !== 4902) throw switchError;
-        allowWalletMethod("wallet_addEthereumChain");
-        await eth.request({
-          method: "wallet_addEthereumChain",
-          params: [
-            {
-              chainId: HIDEKI_HEX,
-              chainName: "Somnia Tokyo (Hideki v2)",
-              nativeCurrency: { name: "STT", symbol: "STT", decimals: 18 },
-              rpcUrls: ["https://api.hideki2.infra.testnet.somnia.network"],
-            },
-          ],
-        });
-      }
-      allowWalletMethod("eth_requestAccounts");
-      const accounts = await eth.request({ method: "eth_requestAccounts" });
-      const first = Array.isArray(accounts) ? accounts.find((item) => typeof item === "string") : null;
-      if (typeof first !== "string") throw new Error("The wallet did not return an account.");
-      allowWalletMethod("eth_chainId");
-      const hex = await eth.request({ method: "eth_chainId" });
-      const parsed = typeof hex === "string" ? Number.parseInt(hex, 16) : Number.NaN;
-      setChainId(Number.isFinite(parsed) ? parsed : null);
-      setAddress(first);
-      setQuote(null);
-      setObserved(null);
-      setConfirmed(false);
-      setResult(null);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The wallet was not connected.");
-    }
   }
 
   async function readQuote() {
@@ -236,25 +176,17 @@ export function ManualTestOrder({ symbol = "BTC", indexerStale = false }: { symb
   return (
     <>
       <section className="order-1 rounded-2xl border border-line bg-surface p-4">
-        <div className="flex items-center gap-2">
-          <Wallet className="size-5 text-accent" />
-          <h2 className="text-base font-semibold">Connect Wallet</h2>
-        </div>
-        <p className="mt-1 text-sm text-muted">Connect your wallet to place a testnet order on dreamDEX.</p>
-        <button type="button" onClick={() => void connect()} className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-accent text-sm font-semibold text-ink">
-          <Wallet className="size-4" />
-          {address ? "Wallet connected" : "Connect Wallet"}
-        </button>
-        <p className="mt-2 text-center text-xs text-muted">Make sure you're on Somnia Testnet (Chain 50383).</p>
+        <h2 className="text-base font-semibold">Wallet</h2>
+        <p className="mt-1 text-sm text-muted">Uses the header connection. This card does not request another wallet.</p>
         {address ? (
-          <p className="mt-2 break-all text-center font-mono text-[11px] text-muted">
+          <p className="mt-3 break-all text-center font-mono text-[11px] text-muted">
             {address}
             <br />
-            chain {chainId ?? "not read"}
-            {chainId === HIDEKI_CHAIN_ID ? " · Hideki v2 chain id matches" : " · wrong network"}
+            {networkLabel(chainId)}
+            {chainId === HIDEKI_CHAIN_ID ? " · chain id matches" : " · wrong network"}
           </p>
         ) : (
-          <p className="mt-2 text-center text-xs text-muted">No wallet connected.</p>
+          <p className="mt-3 text-center text-sm text-muted">No wallet connected. Use Connect in the header.</p>
         )}
       </section>
 

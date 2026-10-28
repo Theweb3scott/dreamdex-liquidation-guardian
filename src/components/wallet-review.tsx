@@ -1,28 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { readWalletReviewAccount, previewProtectiveStopAccount } from "@/lib/guardian/protocol";
 import type { StopPreview } from "@/lib/guardian/stop-preview";
-import {
-  HIDEKI_CHAIN_ID,
-  allowWalletMethod,
-  decideReview,
-  reduceWallet,
-  type ReviewAttempt,
-  type ReviewDecision,
-  type ReviewQuote,
-  type WalletSession,
-} from "@/lib/guardian/review";
+import { HIDEKI_CHAIN_ID, allowWalletMethod, decideReview, type ReviewAttempt, type ReviewDecision, type ReviewQuote } from "@/lib/guardian/review";
+import { useAppWallet } from "@/components/app-wallet";
+import { networkLabel, tradingSessionKey } from "@/lib/guardian/app-wallet";
 
 type Eip1193 = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
-  on?: (event: string, handler: (...args: unknown[]) => void) => void;
-  removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
 };
 
-const HIDEKI_HEX = "0xc4cf";
-const EMPTY: WalletSession = { address: null, chainId: null, error: null };
-
 export function WalletReview() {
-  const [session, setSession] = useState<WalletSession>(EMPTY);
+  const shared = useAppWallet();
+  const session = { address: shared.wallet.address, chainId: shared.wallet.chainId, error: shared.wallet.error };
   const [walletError, setWalletError] = useState<string | null>(null);
   const [quantity, setQuantity] = useState("");
   const [loading, setLoading] = useState(false);
@@ -34,39 +23,17 @@ export function WalletReview() {
   const [stopPreview, setStopPreview] = useState<StopPreview | null>(null);
   const [stopError, setStopError] = useState<string | null>(null);
   const quoted = quotes[selected] ?? null;
-
-  function apply(event: Parameters<typeof reduceWallet>[1]) {
-    setSession((current) => {
-      const next = reduceWallet(current, event);
-      if (next.clearQuote) {
-        setQuotes([]);
-        setDecision(null);
-        setAttempts([]);
-        setStopPreview(null);
-      }
-      setWalletError(next.session.error);
-      return next.session;
-    });
-  }
+  const sessionKey = tradingSessionKey(session.address, session.chainId);
+  const seenSession = useRef(sessionKey);
 
   useEffect(() => {
-    const eth = provider();
-    if (!eth?.on) return;
-    const onAccounts = (...args: unknown[]) => {
-      const accounts = Array.isArray(args[0]) ? args[0].filter((item): item is string => typeof item === "string") : [];
-      apply({ type: "accounts", accounts });
-    };
-    const onChain = (...args: unknown[]) => {
-      const hex = typeof args[0] === "string" ? args[0] : "0x0";
-      apply({ type: "chain", chainId: Number.parseInt(hex, 16) });
-    };
-    eth.on("accountsChanged", onAccounts);
-    eth.on("chainChanged", onChain);
-    return () => {
-      eth.removeListener?.("accountsChanged", onAccounts);
-      eth.removeListener?.("chainChanged", onChain);
-    };
-  }, []);
+    if (seenSession.current === sessionKey) return;
+    seenSession.current = sessionKey;
+    setQuotes([]);
+    setDecision(null);
+    setAttempts([]);
+    setStopPreview(null);
+  }, [sessionKey]);
 
   async function ask(method: string, params?: unknown[]) {
     allowWalletMethod(method);
@@ -75,50 +42,9 @@ export function WalletReview() {
     return eth.request({ method, params });
   }
 
-  async function connect() {
-    setWalletError(null);
-    try {
-      const accounts = (await ask("eth_requestAccounts")) as string[];
-      const address = accounts[0];
-      if (!address) throw new Error("The wallet returned no account.");
-      const chainId = await readChain();
-      apply({ type: "connected", address, chainId });
-    } catch (error) {
-      apply({ type: "rejected", message: error instanceof Error ? error.message : "The wallet refused the connection." });
-    }
-  }
-
   async function readChain(): Promise<number> {
     const hex = (await ask("eth_chainId")) as string;
     return Number.parseInt(hex, 16);
-  }
-
-  async function switchChain() {
-    setWalletError(null);
-    try {
-      await ask("wallet_switchEthereumChain", [{ chainId: HIDEKI_HEX }]);
-      apply({ type: "chain", chainId: await readChain() });
-    } catch (error) {
-      const code = typeof error === "object" && error && "code" in error ? Number(error.code) : 0;
-      if (code === 4902) {
-        try {
-          await ask("wallet_addEthereumChain", [
-            {
-              chainId: HIDEKI_HEX,
-              chainName: "Hideki Testnet",
-              nativeCurrency: { name: "STT", symbol: "STT", decimals: 18 },
-              rpcUrls: ["https://api.hideki2.infra.testnet.somnia.network"],
-            },
-          ]);
-          apply({ type: "chain", chainId: await readChain() });
-          return;
-        } catch (addError) {
-          setWalletError(addError instanceof Error ? addError.message : "The wallet did not add Hideki.");
-          return;
-        }
-      }
-      setWalletError(error instanceof Error ? error.message : "The wallet did not switch chain.");
-    }
   }
 
   async function load() {
@@ -179,7 +105,6 @@ export function WalletReview() {
     try {
       const chainId = await readChain();
       if (!session.address) return;
-      if (chainId !== session.chainId) apply({ type: "chain", chainId });
       const connected = { address: session.address, chainId };
       const again = await readWalletReviewAccount({ data: { account: session.address, quantity: quoted.quantity } });
       const live = again.ok ? again.quotes.find((item) => item.pool.toLowerCase() === quoted.pool.toLowerCase()) ?? null : null;
@@ -207,30 +132,15 @@ export function WalletReview() {
     <section className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
       <div>
         <h2 className="text-base font-semibold">Execution review</h2>
-        <p className="mt-1 text-xs text-muted">This protective review cannot send a transaction. It does not use the testnet order connection. Chain 50383 is checked against Hideki v2 only after this card connects its own wallet.</p>
-      </div>
-      <div className="flex flex-col gap-2">
-        <button type="button" onClick={() => void connect()} className="h-12 rounded-xl bg-accent text-sm font-semibold text-ink">
-          {session.address ? "Reconnect wallet" : "Connect wallet"}
-        </button>
-        {session.address && session.chainId !== HIDEKI_CHAIN_ID ? (
-          <button type="button" onClick={() => void switchChain()} className="h-11 rounded-lg border border-line px-4 font-medium text-fg">
-            Switch to Hideki
-          </button>
-        ) : null}
-        {session.address ? (
-          <button type="button" onClick={() => apply({ type: "disconnect" })} className="h-11 rounded-lg border border-line px-4 font-medium text-fg">
-            Disconnect
-          </button>
-        ) : null}
+        <p className="mt-1 text-xs text-muted">This protective review cannot send a transaction. It uses the header wallet and does not switch networks.</p>
       </div>
       {session.address ? (
         <p className="break-all font-mono text-xs text-muted">
-          {session.address} · chain {session.chainId}
+          {session.address} · {networkLabel(session.chainId)}
           {session.chainId === HIDEKI_CHAIN_ID ? "" : " · wrong network"}
         </p>
       ) : (
-        <p className="text-sm text-muted">No wallet connected. Chain 50383 is required, and it is checked against the v2 contracts.</p>
+        <p className="text-sm text-muted">No wallet connected. Use Connect in the header. A public read still requires chain 50383.</p>
       )}
       <label className="flex flex-col gap-1 text-xs text-muted">
         Raw quantity, blank uses the pool minimum

@@ -2,19 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import ShieldCheck from "lucide-react/dist/esm/icons/shield-check";
 import TriangleAlert from "lucide-react/dist/esm/icons/triangle-alert";
 import { readGuardianShield } from "@/lib/guardian/protocol";
-import { allowWalletMethod, HIDEKI_CHAIN_ID } from "@/lib/guardian/review";
+import { HIDEKI_CHAIN_ID } from "@/lib/guardian/review";
+import { followConnectedAddress, monitoredAddressNote, networkLabel } from "@/lib/guardian/app-wallet";
+import { useAppWallet } from "@/components/app-wallet";
 import { diffShield, localPreviewEvent, shieldHelp, shieldLayout, type ActivityEvent, type ShieldModel } from "@/lib/guardian/shield";
 import type { IntelBook } from "@/lib/guardian/intelligence";
 import { RiskIntelligence } from "@/components/risk-intelligence";
 
-type Eip1193 = { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
-
 const HELP = shieldHelp();
 
 export function GuardianShield() {
+  const shared = useAppWallet();
   const [address, setAddress] = useState("");
-  const [chainId, setChainId] = useState<number | null>(null);
-  const [walletError, setWalletError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [model, setModel] = useState<ShieldModel | null>(null);
@@ -22,6 +21,16 @@ export function GuardianShield() {
   const [timeline, setTimeline] = useState<ActivityEvent[]>([]);
   const [width, setWidth] = useState(390);
   const modelRef = useRef<ShieldModel | null>(null);
+  const syncedAddress = useRef<string | null>(null);
+
+  useEffect(() => {
+    const connected = shared.wallet.address;
+    setAddress((current) => {
+      const next = followConnectedAddress(current, syncedAddress.current, connected);
+      syncedAddress.current = next.synced;
+      return next.value;
+    });
+  }, [shared.wallet.address]);
 
   useEffect(() => {
     const read = () => setWidth(window.innerWidth);
@@ -31,27 +40,6 @@ export function GuardianShield() {
   }, []);
 
   const layout = shieldLayout(width);
-
-  async function connect() {
-    setWalletError(null);
-    const eth = provider();
-    if (!eth) {
-      setWalletError("No browser wallet is available. Paste a public address to read it.");
-      return;
-    }
-    try {
-      allowWalletMethod("eth_requestAccounts");
-      const accounts = (await eth.request({ method: "eth_requestAccounts" })) as string[];
-      const next = accounts[0];
-      if (!next) throw new Error("The wallet returned no account.");
-      allowWalletMethod("eth_chainId");
-      const hex = (await eth.request({ method: "eth_chainId" })) as string;
-      setAddress(next);
-      setChainId(Number.parseInt(hex, 16));
-    } catch (caught) {
-      setWalletError(caught instanceof Error ? caught.message : "The wallet refused the connection.");
-    }
-  }
 
   async function load(target: string) {
     setLoading(true);
@@ -112,27 +100,26 @@ export function GuardianShield() {
             aria-label="Shield public address"
             className="h-11 rounded-xl border border-line bg-raised px-3 font-mono text-sm outline-none focus:border-accent"
           />
-          <div className="flex gap-2">
-            <button type="button" onClick={() => void connect()} className="h-11 flex-1 rounded-xl border border-line text-sm font-medium">
-              {address ? "Reconnect wallet" : "Connect wallet"}
-            </button>
-            <button
-              type="button"
-              disabled={loading || address.trim() === ""}
-              onClick={() => void load(address)}
-              className="h-11 flex-1 rounded-xl bg-accent text-sm font-semibold text-ink disabled:opacity-50"
-            >
-              {loading ? "Reading…" : "Refresh shield"}
-            </button>
-          </div>
+          <button
+            type="button"
+            disabled={loading || address.trim() === ""}
+            onClick={() => void load(address)}
+            className="h-11 w-full rounded-xl bg-accent text-sm font-semibold text-ink disabled:opacity-50"
+          >
+            {loading ? "Reading…" : "Refresh shield"}
+          </button>
         </div>
-        <p className="mt-2 text-xs text-muted">
+        <p className="mt-2 break-all text-xs text-muted">
           {address
-            ? `${address} · wallet chain ${chainId ?? "not read"} · Hideki v2 read`
+            ? `${address} · ${networkLabel(shared.wallet.chainId)} · read only`
             : "No wallet required. A public address is enough."}
-          {chainId != null && chainId !== HIDEKI_CHAIN_ID ? " · wallet is not on chain 50383" : ""}
+          {shared.wallet.chainId != null && shared.wallet.chainId !== HIDEKI_CHAIN_ID ? " · wallet is not on chain 50383" : ""}
         </p>
-        {walletError ? <p className="mt-2 text-sm text-danger">{walletError}</p> : null}
+        {monitoredAddressNote(address, shared.wallet.address) ? (
+          <p className={"mt-1 text-xs " + (shared.wallet.address && address.trim().toLowerCase() !== shared.wallet.address.toLowerCase() ? "text-warning" : "text-muted")}>
+            {monitoredAddressNote(address, shared.wallet.address)}
+          </p>
+        ) : null}
         {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
       </div>
 
@@ -162,7 +149,7 @@ export function GuardianShield() {
       )}
 
       {model ? <ShieldBody model={model} columns={layout.columns} timeline={timeline} /> : null}
-      {intel ? <RiskIntelligence key={`${intel.address}:${intel.chainId}:${intel.refreshedAt}`} book={intel} walletChainId={chainId} /> : null}
+      {intel ? <RiskIntelligence key={`${intel.address}:${intel.chainId}:${intel.refreshedAt}`} book={intel} walletChainId={shared.wallet.chainId} /> : null}
 
       <details className="rounded-2xl border border-line bg-surface p-4">
         <summary className="cursor-pointer text-sm font-medium">What these words mean</summary>
@@ -301,11 +288,4 @@ function Fact({ label, value }: { label: string; value: string | null }) {
 function flag(value: boolean | null): string {
   if (value == null) return "unknown";
   return value ? "yes" : "no";
-}
-
-function provider(): Eip1193 | null {
-  if (typeof window === "undefined") return null;
-  const candidate = (window as Window & { ethereum?: Eip1193 }).ethereum;
-  if (!candidate || typeof candidate.request !== "function") return null;
-  return candidate;
 }

@@ -6,8 +6,10 @@ import Home from "lucide-react/dist/esm/icons/home";
 import Play from "lucide-react/dist/esm/icons/play";
 import Shield from "lucide-react/dist/esm/icons/shield";
 import { WalletReview } from "@/components/wallet-review";
+import { useAppWallet } from "@/components/app-wallet";
 import { ManualTestOrder } from "@/components/manual-order";
 import { GuardianShield } from "@/components/guardian-shield";
+import { followConnectedAddress, connectionStatus, monitoredAddressNote, networkLabel, shortAddress } from "@/lib/guardian/app-wallet";
 import { listHidekiPerps, type PerpQuote } from "@/lib/guardian/markets";
 import { readProtocolAccount, previewDryRun } from "@/lib/guardian/protocol";
 import { disarm, emptyJournal, restoreJournal, serializeJournal, type Journal, type Proposal } from "@/lib/guardian/execution";
@@ -333,6 +335,7 @@ export function GuardianDesk() {
 }
 
 function ProtocolPanel({ screen }: { screen: Screen }) {
+  const shared = useAppWallet();
   const [account, setAccount] = useState("");
   const [pending, setPending] = useState(false);
   const [watching, setWatching] = useState(false);
@@ -355,7 +358,17 @@ function ProtocolPanel({ screen }: { screen: Screen }) {
   const gate = useRef(createReadGate());
   const seq = useRef(0);
   const limitsRef = useRef({ warning, danger, critical });
+  const syncedAddress = useRef<string | null>(null);
   limitsRef.current = { warning, danger, critical };
+
+  useEffect(() => {
+    const connected = shared.wallet.address;
+    setAccount((current) => {
+      const next = followConnectedAddress(current, syncedAddress.current, connected);
+      syncedAddress.current = next.synced;
+      return next.value;
+    });
+  }, [shared.wallet.address]);
 
   const limits = parseThresholds({ warning, danger, critical });
   const snapshot = useMemo(() => (read?.account ? toSnapshot(read) : null), [read]);
@@ -487,7 +500,7 @@ function ProtocolPanel({ screen }: { screen: Screen }) {
       <div className={screen === "dashboard" ? "flex flex-col gap-3" : "hidden"}>
         <section className="rounded-2xl border border-line bg-surface p-4">
           <h2 className="text-base font-semibold">Check Your Account</h2>
-          <p className="mt-1 text-sm leading-relaxed text-muted">Enter a public wallet address to monitor your dreamDEX account.</p>
+          <p className="mt-1 text-sm leading-relaxed text-muted">Enter a public wallet address to monitor your dreamDEX account. No connection is required.</p>
           <div className="mt-3 flex items-center gap-2 rounded-xl border border-line bg-raised px-3">
             <input
               value={account}
@@ -504,6 +517,11 @@ function ProtocolPanel({ screen }: { screen: Screen }) {
               <Copy className="size-4" />
             </button>
           </div>
+          {monitoredAddressNote(account, shared.wallet.address) ? (
+            <p className={"mt-2 text-xs " + (shared.wallet.address && account.trim().toLowerCase() !== shared.wallet.address.toLowerCase() ? "text-warning" : "text-muted")}>
+              {monitoredAddressNote(account, shared.wallet.address)}
+            </p>
+          ) : null}
           <button
             type="button"
             disabled={pending && !watching}
@@ -793,21 +811,41 @@ function short(address: string): string {
 }
 
 function AppHeader() {
+  const { wallet, connect, disconnect } = useAppWallet();
+  const status = connectionStatus(wallet.address, wallet.chainId);
   return (
-    <header className="flex items-center justify-between gap-3">
-      <div className="flex items-center gap-2">
-        <span className="grid size-9 place-items-center rounded-full border border-accent/40 text-accent">
-          <Shield className="size-4" />
-        </span>
-        <div>
-          <h1 className="text-[15px] font-semibold leading-tight">Liquidation Guardian</h1>
-          <p className="text-[11px] text-muted">Your futures risk companion</p>
+    <header>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="grid size-9 shrink-0 place-items-center rounded-full border border-accent/40 text-accent">
+            <Shield className="size-4" />
+          </span>
+          <div className="min-w-0">
+            <h1 className="text-[15px] font-semibold leading-tight">Liquidation Guardian</h1>
+            <p className="text-[11px] text-muted">Your futures risk companion</p>
+          </div>
         </div>
+        {wallet.address ? (
+          <div className="shrink-0 text-right">
+            <p className="flex items-center justify-end gap-1.5 font-mono text-[11px] text-fg">
+              <span className={"size-1.5 rounded-full " + (status === "connected" ? "bg-healthy" : "bg-warning")} />
+              {shortAddress(wallet.address)}
+            </p>
+            <p className="text-[10px] text-muted">
+              {networkLabel(wallet.chainId)}
+              {" · "}
+              <button type="button" onClick={disconnect} className="text-accent">
+                Disconnect
+              </button>
+            </p>
+          </div>
+        ) : (
+          <button type="button" onClick={() => void connect()} className="h-9 shrink-0 rounded-full bg-accent px-3 text-[11px] font-semibold text-ink">
+            Connect
+          </button>
+        )}
       </div>
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] text-fg">
-        <span className="size-1.5 rounded-full bg-healthy" />
-        Somnia Testnet
-      </span>
+      {wallet.error ? <p className="mt-2 text-right text-[11px] text-danger">{wallet.error}</p> : null}
     </header>
   );
 }

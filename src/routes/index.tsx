@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { AppWalletProvider } from "@/components/app-wallet";
 import { GuardianDesk } from "@/components/guardian-desk";
 
 export const Route = createFileRoute("/")({
@@ -6,5 +7,9 @@ export const Route = createFileRoute("/")({
 });
 
 function Home() {
-  return <GuardianDesk />;
+  return (
+    <AppWalletProvider>
+      <GuardianDesk />
+    </AppWalletProvider>
+  );
 }
